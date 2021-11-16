@@ -12,4 +12,6 @@
 #define BUTTON_PUSH_TIMEOUT_MS          2000    /**< The time to hold for a long push (in milliseconds). */
 #define BUTTON_DEBOUNCE_DELAY           50      /**<  Delay from a GPIOTE event until a button is reported as pushed. */
 
+void button_handler(uint8_t pin_no, uint8_t button_action);
+
 #endif /*GPIO_APP_H_*/

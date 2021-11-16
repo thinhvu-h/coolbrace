@@ -41,6 +41,7 @@ SRC_FILES += \
 	$(SDK_ROOT)/components/libraries/ringbuf/nrf_ringbuf.c \
 	$(SDK_ROOT)/components/libraries/experimental_section_vars/nrf_section_iter.c \
 	$(SDK_ROOT)/components/libraries/strerror/nrf_strerror.c \
+	$(SDK_ROOT)/components/libraries/sensorsim/sensorsim.c \
 	$(SDK_ROOT)/modules/nrfx/mdk/system_nrf52.c \
 	$(SDK_ROOT)/components/boards/boards.c \
 	$(SDK_ROOT)/integration/nrfx/legacy/nrf_drv_clock.c \
@@ -53,9 +54,11 @@ SRC_FILES += \
 	$(SDK_ROOT)/modules/nrfx/drivers/src/nrfx_twi.c \
   	$(SDK_ROOT)/modules/nrfx/drivers/src/nrfx_twim.c \
 	$(SDK_ROOT)/components/libraries/bsp/bsp.c \
+	$(SDK_ROOT)/components/libraries/bsp/bsp_btn_ble.c \
 	$(PROJ_DIR)/firmw/drivers/twi_nrf52.c \
-	$(PROJ_DIR)/firmw/bluetooth/ble_app.c \
 	$(PROJ_DIR)/firmw/bluetooth/ble_cus.c \
+	$(PROJ_DIR)/firmw/bluetooth/ble_app.c \
+	$(PROJ_DIR)/firmw/battery/battery_app.c \
 	$(PROJ_DIR)/main.c \
 	$(SDK_ROOT)/components/libraries/bootloader/dfu/nrf_dfu_svci.c \
 	$(SDK_ROOT)/external/segger_rtt/SEGGER_RTT.c \
@@ -87,6 +90,7 @@ SRC_FILES += \
 	$(SDK_ROOT)/components/ble/ble_services/ble_dis/ble_dis.c \
 	$(SDK_ROOT)/components/ble/ble_services/ble_hts/ble_hts.c \
 	$(SDK_ROOT)/components/ble/ble_services/ble_lbs/ble_lbs.c \
+	$(SDK_ROOT)/components/ble/ble_services/ble_bas/ble_bas.c \
 	$(SDK_ROOT)/components/softdevice/common/nrf_sdh.c \
 	$(SDK_ROOT)/components/softdevice/common/nrf_sdh_ble.c \
 	$(SDK_ROOT)/components/softdevice/common/nrf_sdh_soc.c \
@@ -191,6 +195,7 @@ INC_FOLDERS += \
 	$(SDK_ROOT)/components/nfc/t2t_parser \
 	$(SDK_ROOT)/components/nfc/ndef/connection_handover/ble_pair_msg \
 	$(SDK_ROOT)/components/libraries/usbd/class/audio \
+	$(SDK_ROOT)/components/libraries/sensorsim \
 	$(SDK_ROOT)/components/nfc/t4t_lib \
 	$(SDK_ROOT)/components/ble/peer_manager \
 	$(SDK_ROOT)/components/libraries/mem_manager \
@@ -227,6 +232,8 @@ INC_FOLDERS += \
 	$(SDK_ROOT)/components/libraries/stack_guard \
 	$(SDK_ROOT)/components/libraries/log/src \
 	$(PROJ_DIR)/firmw/bluetooth \
+	$(PROJ_DIR)/firmw/battery \
+    $(PROJ_DIR)/firmw/temperature \
 	$(PROJ_DIR)/firmw/drivers
 
 # Libraries common to all targets

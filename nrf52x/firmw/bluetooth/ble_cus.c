@@ -1,4 +1,5 @@
 #include "ble_cus.h"
+#include "SEGGER_RTT.h"
 
 /**@brief Function for handling the Connect event.
  *
@@ -47,6 +48,7 @@ static void on_write(ble_cus_t * p_cus, ble_evt_t const * p_ble_evt)
     // Custom Value Characteristic Written to.
     if (p_evt_write->handle == p_cus->custom_value_handles.value_handle)
     {
+        SEGGER_RTT_printf(0, "received custom data: %d\n", *p_evt_write->data);
         // 17 18 19 20
         if(*p_evt_write->data == 0x02)
         {

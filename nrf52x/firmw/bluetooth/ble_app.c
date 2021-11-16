@@ -1,10 +1,12 @@
 #include "ble_app.h"
+#include "SEGGER_RTT.h"
+#include "sensorsim.h"
 
 static uint16_t          m_conn_handle = BLE_CONN_HANDLE_INVALID;                   /**< Handle of the current connection. */
-static bool              m_hts_meas_ind_conf_pending = false;                       /**< Flag to keep track of when an indication confirmation is pending. */
+static bool              m_hts_meas_ind_conf_pending = true;                       /**< Flag to keep track of when an indication confirmation is pending. */
 
 BLE_CUS_DEF(m_cus);                                                                 /**< Custom Service instance. */
-BLE_LBS_DEF(m_lbs);                                                                 /**< LED Button Service instance. */
+// BLE_LBS_DEF(m_lbs);                                                                 /**< LED Button Service instance. */
 BLE_HTS_DEF(m_hts);                                                                 /**< Structure used to identify the health thermometer service. */
 BLE_BAS_DEF(m_bas);                                                                 /**< Structure used to identify the battery service. */
 NRF_BLE_GATT_DEF(m_gatt);                                                           /**< GATT module instance. */
@@ -16,8 +18,38 @@ static ble_uuid_t m_adv_uuids[] =                                               
     {BLE_UUID_DEVICE_INFORMATION_SERVICE, BLE_UUID_TYPE_BLE}
 };
 
-static void temperature_measurement_send(void);
-static uint8_t m_custom_value = 0;
+
+#define MIN_BATTERY_LEVEL                   81                                      /**< Minimum simulated battery level. */
+#define MAX_BATTERY_LEVEL                   100                                     /**< Maximum simulated battery level. */
+#define BATTERY_LEVEL_INCREMENT             1                                       /**< Increment between each simulated battery level measurement. */
+
+#define MIN_CELCIUS_DEGREES             3688                                        /**< Minimum temperature in celcius for use in the simulated measurement function (multiplied by 100 to avoid floating point arithmetic). */
+#define MAX_CELCIUS_DEGRESS             3972                                        /**< Maximum temperature in celcius for use in the simulated measurement function (multiplied by 100 to avoid floating point arithmetic). */
+#define CELCIUS_DEGREES_INCREMENT       36                                          /**< Value by which temperature is incremented/decremented for each call to the simulated measurement function (multiplied by 100 to avoid floating point arithmetic). */
+
+static sensorsim_cfg_t   m_battery_sim_cfg;     /**< Battery Level sensor simulator configuration. */
+static sensorsim_state_t m_battery_sim_state;   /**< Battery Level sensor simulator state. */
+static sensorsim_cfg_t   m_temp_celcius_sim_cfg;    /**< Temperature simulator configuration. */
+static sensorsim_state_t m_temp_celcius_sim_state;  /**< Temperature simulator state. */
+
+/**@brief Function for initializing the sensor simulators.
+ */
+void sensor_simulator_init(void)
+{
+    m_battery_sim_cfg.min          = MIN_BATTERY_LEVEL;
+    m_battery_sim_cfg.max          = MAX_BATTERY_LEVEL;
+    m_battery_sim_cfg.incr         = BATTERY_LEVEL_INCREMENT;
+    m_battery_sim_cfg.start_at_max = true;
+
+    sensorsim_init(&m_battery_sim_state, &m_battery_sim_cfg);
+
+    m_temp_celcius_sim_cfg.min          = MIN_CELCIUS_DEGREES;
+    m_temp_celcius_sim_cfg.max          = MAX_CELCIUS_DEGRESS;
+    m_temp_celcius_sim_cfg.incr         = CELCIUS_DEGREES_INCREMENT;
+    m_temp_celcius_sim_cfg.start_at_max = false;
+
+    sensorsim_init(&m_temp_celcius_sim_state, &m_temp_celcius_sim_cfg);
+}
 
 /**@brief Function for handling the Battery measurement timer timeout.
  *
@@ -26,16 +58,39 @@ static uint8_t m_custom_value = 0;
  * @param[in] p_context  Pointer used for passing some arbitrary information (context) from the
  *                       app_start_timer() call to the timeout handler.
  */
-void notification_timeout_handler(void * p_context)
+// void notification_timeout_handler(void * p_context)
+// {
+//     UNUSED_PARAMETER(p_context);
+//     ret_code_t err_code;
+    
+//     // Increment the value of m_custom_value before nortifing it.
+//     m_custom_value++;
+    
+//     err_code = ble_cus_custom_value_update(&m_cus, m_custom_value);
+//     APP_ERROR_CHECK(err_code);
+// }
+
+/**@brief Function for performing a battery measurement, and update the Battery Level characteristic in the Battery Service.
+ */
+static void battery_level_update(void)
 {
-    UNUSED_PARAMETER(p_context);
     ret_code_t err_code;
-    
-    // Increment the value of m_custom_value before nortifing it.
-    m_custom_value++;
-    
-    err_code = ble_cus_custom_value_update(&m_cus, m_custom_value);
-    APP_ERROR_CHECK(err_code);
+    uint8_t  battery_level;
+
+    battery_level = (uint8_t)sensorsim_measure(&m_battery_sim_state, &m_battery_sim_cfg);
+
+    SEGGER_RTT_printf(0, "battery_level: %d. sending...\n", battery_level);
+
+    err_code = ble_bas_battery_level_update(&m_bas, battery_level, BLE_CONN_HANDLE_ALL);
+    if ((err_code != NRF_SUCCESS) &&
+        (err_code != NRF_ERROR_INVALID_STATE) &&
+        (err_code != NRF_ERROR_RESOURCES) &&
+        (err_code != NRF_ERROR_BUSY) &&
+        (err_code != BLE_ERROR_GATTS_SYS_ATTR_MISSING)
+       )
+    {
+        APP_ERROR_HANDLER(err_code);
+    }
 }
 
 /**@brief Function for handling the Battery measurement timer timeout.
@@ -48,8 +103,75 @@ void notification_timeout_handler(void * p_context)
 void battery_timeout_handler(void * p_context)
 {
     UNUSED_PARAMETER(p_context);
+    battery_level_update();
 }
 
+/**@brief Function for populating simulated health thermometer measurement.
+ */
+static void hts_sim_measurement(ble_hts_meas_t * p_meas)
+{
+    static ble_date_time_t time_stamp = { 2020, 30, 11, 10, 50, 0 };
+    uint32_t celciusX100;
+
+    p_meas->temp_in_fahr_units = false;
+    p_meas->time_stamp_present = true;
+    p_meas->temp_type_present  = (TEMP_TYPE_AS_CHARACTERISTIC ? false : true);
+
+    celciusX100 = sensorsim_measure(&m_temp_celcius_sim_state, &m_temp_celcius_sim_cfg);
+
+    p_meas->temp_in_celcius.exponent = -2;
+    p_meas->temp_in_celcius.mantissa = celciusX100;
+    p_meas->temp_in_fahr.exponent    = -2;
+    p_meas->temp_in_fahr.mantissa    = (32 * 100) + ((celciusX100 * 9) / 5);
+    p_meas->time_stamp               = time_stamp;
+    p_meas->temp_type                = BLE_HTS_TEMP_TYPE_BODY;
+
+    // update simulated time stamp
+    time_stamp.seconds += 27;
+    if (time_stamp.seconds > 59)
+    {
+        time_stamp.seconds -= 60;
+        time_stamp.minutes++;
+        if (time_stamp.minutes > 59)
+        {
+            time_stamp.minutes = 0;
+        }
+    }
+}
+
+/**@brief Function for simulating and sending one Temperature Measurement.
+ */
+static void temperature_measurement_update(void)
+{
+    ble_hts_meas_t simulated_meas;
+    ret_code_t     err_code;
+    if (!m_hts_meas_ind_conf_pending)
+    {
+        hts_sim_measurement(&simulated_meas);
+
+        SEGGER_RTT_printf(0, "\ndegree %d temperature send...\n", simulated_meas.temp_in_celcius.mantissa);
+        err_code = ble_hts_measurement_send(&m_hts, &simulated_meas);
+
+        switch (err_code)
+        {
+            case NRF_SUCCESS:
+                SEGGER_RTT_printf(0, "NRF_SUCCESS\n");
+                // Measurement was successfully sent, wait for confirmation.
+                m_hts_meas_ind_conf_pending = true;
+                break;
+
+            case NRF_ERROR_INVALID_STATE:
+                SEGGER_RTT_printf(0, "NRF_ERROR_INVALID_STATE\n");
+                // Ignore error.
+                break;
+
+            default:
+                SEGGER_RTT_printf(0, "err_code default\n");
+                APP_ERROR_HANDLER(err_code);
+                break;
+        }
+    }
+}
 /**@brief Function for handling the Battery measurement timer timeout.
  *
  * @details This function will be called each time the battery level measurement timer expires.
@@ -60,6 +182,7 @@ void battery_timeout_handler(void * p_context)
 void temperature_timeout_handler(void * p_context)
 {
     UNUSED_PARAMETER(p_context);
+    temperature_measurement_update();
 }
 
 /**@brief Function for handling Peer Manager events.
@@ -77,14 +200,14 @@ static void pm_evt_handler(pm_evt_t const * p_evt)
     switch (p_evt->evt_id)
     {
         case PM_EVT_CONN_SEC_SUCCEEDED:
-            // Send a single temperature measurement if indication is enabled.
-            // NOTE: For this to work, make sure ble_hts_on_ble_evt() is called before
-            // pm_evt_handler() in ble_evt_dispatch().
+            SEGGER_RTT_printf(0, "PM_EVT_CONN_SEC_SUCCEEDED\n");
             err_code = ble_hts_is_indication_enabled(&m_hts, &is_indication_enabled);
             APP_ERROR_CHECK(err_code);
+            SEGGER_RTT_printf(0, "is_indication_enabled: %d\n", is_indication_enabled);
             if (is_indication_enabled)
             {
-                temperature_measurement_send();
+                m_hts_meas_ind_conf_pending = false;
+                temperature_measurement_update();
             }
             break;
 
@@ -95,35 +218,6 @@ static void pm_evt_handler(pm_evt_t const * p_evt)
         default:
             break;
     }
-}
-
-
-/**@brief Function for populating simulated health thermometer measurement.
- */
-static void hts_measurement(ble_hts_meas_t * p_meas)
-{
-    double obj_temp_in_celcius = 0;
-    double amb_temp_in_celcius = 0;
-    double obj_temp_sum = 0;
-
-    p_meas->temp_in_fahr_units = false;
-    p_meas->time_stamp_present = false;
-    p_meas->temp_type_present  = (TEMP_TYPE_AS_CHARACTERISTIC ? false : true);
-
-    // mlx90632_get_object_temp(&obj_temp_in_celcius);
-    // mlx90632_get_ambient_temp(&amb_temp_in_celcius);
-    // for(int i=0; i<20; i++){
-    //     mlx90632_get_object_temp(&obj_temp_in_celcius);
-    //     obj_temp_sum +=obj_temp_in_celcius;
-    //     nrf_delay_ms(30);
-    // }
-    obj_temp_sum = obj_temp_sum/20;
-
-    p_meas->temp_in_celcius.exponent = -2;
-    p_meas->temp_in_celcius.mantissa = obj_temp_sum*100;
-    p_meas->temp_in_fahr.exponent    = -2;
-    p_meas->temp_in_fahr.mantissa    = amb_temp_in_celcius*100;
-    p_meas->temp_type                = BLE_HTS_TEMP_TYPE_BODY;
 }
 
 
@@ -168,36 +262,6 @@ void gatt_init(void)
     APP_ERROR_CHECK(err_code);
 }
 
-/**@brief Function for simulating and sending one Temperature Measurement.
- */
-static void temperature_measurement_send(void)
-{
-    ble_hts_meas_t hts_meas;
-    ret_code_t     err_code;
-
-    if (!m_hts_meas_ind_conf_pending)
-    {
-        hts_measurement(&hts_meas);
-
-        err_code = ble_hts_measurement_send(&m_hts, &hts_meas);
-
-        switch (err_code)
-        {
-            case NRF_SUCCESS:
-                // Measurement was successfully sent, wait for confirmation.
-                m_hts_meas_ind_conf_pending = true;
-                break;
-
-            case NRF_ERROR_INVALID_STATE:
-                // Ignore error.
-                break;
-
-            default:
-                APP_ERROR_HANDLER(err_code);
-                break;
-        }
-    }
-}
 
 /**@brief Function for handling the Custom Service Service events.
  *
@@ -211,7 +275,7 @@ static void temperature_measurement_send(void)
 static void on_cus_evt(ble_cus_t     * p_cus_service,
                        ble_cus_evt_t * p_evt)
 {
-    ret_code_t err_code;
+    // ret_code_t err_code;
     
     switch(p_evt->evt_type)
     {
@@ -252,11 +316,13 @@ static void on_hts_evt(ble_hts_t * p_hts, ble_hts_evt_t * p_evt)
     switch (p_evt->evt_type)
     {
         case BLE_HTS_EVT_INDICATION_ENABLED:
+            SEGGER_RTT_printf(0, "BLE_HTS_EVT_INDICATION_ENABLED\n");
             // Indication has been enabled, send a single temperature measurement
-            temperature_measurement_send();
+            temperature_measurement_update();
             break;
 
         case BLE_HTS_EVT_INDICATION_CONFIRMED:
+            SEGGER_RTT_printf(0, "BLE_HTS_EVT_INDICATION_CONFIRMED\n");
             m_hts_meas_ind_conf_pending = false;
             break;
 
@@ -284,15 +350,16 @@ static void nrf_qwr_error_handler(uint32_t nrf_error)
  * @param[in] p_lbs     Instance of LED Button Service to which the write applies.
  * @param[in] led_state Written/desired state of the LED.
  */
-static void led_write_handler(uint16_t conn_handle, ble_lbs_t * p_lbs, uint8_t led_state)
-{
-    if (led_state)
-    {
-        m_hts_meas_ind_conf_pending = false;
-        // Indication has been enabled, send a single temperature measurement
-        temperature_measurement_send();
-    }
-}
+// static void led_write_handler(uint16_t conn_handle, ble_lbs_t * p_lbs, uint8_t led_state)
+// {
+//     SEGGER_RTT_printf(0, "\nled_state: %d\n", led_state);
+    // if (led_state)
+    // {
+    //     m_hts_meas_ind_conf_pending = false;
+    //     // Indication has been enabled, send a single temperature measurement
+    //     temperature_measurement_update();
+    // }
+// }
 
 /**@brief Function for initializing services that will be used by the application.
  *
@@ -305,7 +372,7 @@ void services_init(void)
     ble_bas_init_t     bas_init;
     ble_dis_init_t     dis_init;
     ble_cus_init_t     cus_init;
-    ble_lbs_init_t     lbs_init = {0};
+    // ble_lbs_init_t     lbs_init = {0};
     nrf_ble_qwr_init_t qwr_init = {0};
     ble_dis_sys_id_t   sys_id;
 
@@ -326,6 +393,9 @@ void services_init(void)
     hts_init.ht_meas_cccd_wr_sec = SEC_JUST_WORKS;
     hts_init.ht_type_rd_sec      = SEC_OPEN;
 
+    err_code = ble_hts_init(&m_hts, &hts_init);
+    APP_ERROR_CHECK(err_code);
+
     // Initialize Battery Service.
     memset(&bas_init, 0, sizeof(bas_init));
 
@@ -342,14 +412,11 @@ void services_init(void)
     err_code = ble_bas_init(&m_bas, &bas_init);
     APP_ERROR_CHECK(err_code);
 
-    err_code = ble_hts_init(&m_hts, &hts_init);
-    APP_ERROR_CHECK(err_code);
+    // Initialize LBS. // make use of led_write_handler to set PWM level
+    // lbs_init.led_write_handler = led_write_handler;
 
-    // Initialize LBS. // make use of led_write_handler to trigger measure temperature
-    lbs_init.led_write_handler = led_write_handler;
-
-    err_code = ble_lbs_init(&m_lbs, &lbs_init);
-    APP_ERROR_CHECK(err_code);
+    // err_code = ble_lbs_init(&m_lbs, &lbs_init);
+    // APP_ERROR_CHECK(err_code);
 
     // Initialize CUS Service init structure to zero.
     cus_init.evt_handler                = on_cus_evt;
@@ -458,6 +525,7 @@ static void on_adv_evt(ble_adv_evt_t ble_adv_evt)
     switch (ble_adv_evt)
     {
         case BLE_ADV_EVT_FAST:
+            SEGGER_RTT_printf(0, "%s\n", "Fast advertising.");
             err_code = bsp_indication_set(BSP_INDICATE_ADVERTISING);
             APP_ERROR_CHECK(err_code);
             break;
@@ -484,6 +552,7 @@ static void ble_evt_handler(ble_evt_t const * p_ble_evt, void * p_context)
     switch (p_ble_evt->header.evt_id)
     {
         case BLE_GAP_EVT_CONNECTED:
+            SEGGER_RTT_printf(0, "\nConnected.\n");
             err_code = bsp_indication_set(BSP_INDICATE_CONNECTED);
             APP_ERROR_CHECK(err_code);
             m_conn_handle = p_ble_evt->evt.gap_evt.conn_handle;
@@ -492,6 +561,7 @@ static void ble_evt_handler(ble_evt_t const * p_ble_evt, void * p_context)
             break;
 
         case BLE_GAP_EVT_DISCONNECTED:
+            SEGGER_RTT_printf(0, "\nDisconnected, reason %d.\n", p_ble_evt->evt.gap_evt.params.disconnected.reason);
             m_conn_handle               = BLE_CONN_HANDLE_INVALID;
             m_hts_meas_ind_conf_pending = false;
             break;
@@ -508,6 +578,7 @@ static void ble_evt_handler(ble_evt_t const * p_ble_evt, void * p_context)
         } break;
 
         case BLE_GATTC_EVT_TIMEOUT:
+            SEGGER_RTT_printf(0, "\nGATT Client Timeout.\n");
             // Disconnect on GATT Client timeout event.
             err_code = sd_ble_gap_disconnect(p_ble_evt->evt.gattc_evt.conn_handle,
                                              BLE_HCI_REMOTE_USER_TERMINATED_CONNECTION);
@@ -515,6 +586,7 @@ static void ble_evt_handler(ble_evt_t const * p_ble_evt, void * p_context)
             break;
 
         case BLE_GATTS_EVT_TIMEOUT:
+            SEGGER_RTT_printf(0, "\nGATT Server Timeout.\n");
             // Disconnect on GATT Server timeout event.
             err_code = sd_ble_gap_disconnect(p_ble_evt->evt.gatts_evt.conn_handle,
                                              BLE_HCI_REMOTE_USER_TERMINATED_CONNECTION);
@@ -594,6 +666,8 @@ void delete_bonds(void)
 {
     ret_code_t err_code;
 
+    SEGGER_RTT_printf(0, "Erase bond\n");
+
     err_code = pm_peers_delete();
     APP_ERROR_CHECK(err_code);
 }
@@ -648,10 +722,11 @@ static void bsp_event_handler(bsp_event_t event)
             break;
 
         case BSP_EVENT_KEY_0:
-            if (m_conn_handle != BLE_CONN_HANDLE_INVALID)
-            {
-                temperature_measurement_send();
-            }
+            // if (m_conn_handle != BLE_CONN_HANDLE_INVALID)
+            // {
+            //     temperature_measurement_send();
+            // }
+            // TO DO: notify for app when operation level change
             break;
 
         default:

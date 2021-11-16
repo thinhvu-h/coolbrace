@@ -30,6 +30,8 @@
 #include "nrf_ble_qwr.h"
 #include "nrf_delay.h"
 
+#include "battery_app.h"
+#include "temperature_app.h"
 #include "ble_cus.h"
 
 #define DEVICE_NAME                     "coolbrace"                                 /**< Name of device. Will be included in the advertising data. */
@@ -87,5 +89,8 @@ extern void peer_manager_init(void);
 extern void notification_timeout_handler(void * p_context);
 extern void battery_timeout_handler(void * p_context);
 extern void temperature_timeout_handler(void * p_context);
+
+//
+extern void sensor_simulator_init(void);
 
 #endif /*BLE_APP_ADV_CFG_H_*/
