@@ -3,7 +3,7 @@
 #include "sensorsim.h"
 
 static uint16_t          m_conn_handle = BLE_CONN_HANDLE_INVALID;                   /**< Handle of the current connection. */
-static bool              m_hts_meas_ind_conf_pending = true;                       /**< Flag to keep track of when an indication confirmation is pending. */
+static bool              m_hts_meas_ind_conf_pending = false;                       /**< Flag to keep track of when an indication confirmation is pending. */
 
 BLE_CUS_DEF(m_cus);                                                                 /**< Custom Service instance. */
 // BLE_LBS_DEF(m_lbs);                                                                 /**< LED Button Service instance. */
@@ -79,9 +79,8 @@ static void battery_level_update(void)
 
     battery_level = (uint8_t)sensorsim_measure(&m_battery_sim_state, &m_battery_sim_cfg);
 
-    SEGGER_RTT_printf(0, "battery_level: %d. sending...\n", battery_level);
-
     err_code = ble_bas_battery_level_update(&m_bas, battery_level, BLE_CONN_HANDLE_ALL);
+
     if ((err_code != NRF_SUCCESS) &&
         (err_code != NRF_ERROR_INVALID_STATE) &&
         (err_code != NRF_ERROR_RESOURCES) &&
@@ -89,7 +88,10 @@ static void battery_level_update(void)
         (err_code != BLE_ERROR_GATTS_SYS_ATTR_MISSING)
        )
     {
+        SEGGER_RTT_printf(0, "Battery level: %d ... Sending => FAILED\n", battery_level);
         APP_ERROR_HANDLER(err_code);
+    } else {
+        SEGGER_RTT_printf(0, "Battery level: %d ... Sending => SUCCESSED\n", battery_level);
     }
 }
 
@@ -114,7 +116,7 @@ static void hts_sim_measurement(ble_hts_meas_t * p_meas)
     uint32_t celciusX100;
 
     p_meas->temp_in_fahr_units = false;
-    p_meas->time_stamp_present = true;
+    p_meas->time_stamp_present = false;
     p_meas->temp_type_present  = (TEMP_TYPE_AS_CHARACTERISTIC ? false : true);
 
     celciusX100 = sensorsim_measure(&m_temp_celcius_sim_state, &m_temp_celcius_sim_cfg);
@@ -149,24 +151,23 @@ static void temperature_measurement_update(void)
     {
         hts_sim_measurement(&simulated_meas);
 
-        SEGGER_RTT_printf(0, "\ndegree %d temperature send...\n", simulated_meas.temp_in_celcius.mantissa);
         err_code = ble_hts_measurement_send(&m_hts, &simulated_meas);
 
         switch (err_code)
         {
             case NRF_SUCCESS:
-                SEGGER_RTT_printf(0, "NRF_SUCCESS\n");
+                SEGGER_RTT_printf(0, "\nTemperature: %d ... Sending => SUCCESSED\n", simulated_meas.temp_in_celcius.mantissa);
                 // Measurement was successfully sent, wait for confirmation.
                 m_hts_meas_ind_conf_pending = true;
                 break;
 
             case NRF_ERROR_INVALID_STATE:
-                SEGGER_RTT_printf(0, "NRF_ERROR_INVALID_STATE\n");
+                SEGGER_RTT_printf(0, "\nTemperature: %d ... Sending => INVALID_STATE\n", simulated_meas.temp_in_celcius.mantissa);
                 // Ignore error.
                 break;
 
             default:
-                SEGGER_RTT_printf(0, "err_code default\n");
+                SEGGER_RTT_printf(0, "\nTemperature: %d ... Sending => FAILED\n", simulated_meas.temp_in_celcius.mantissa);
                 APP_ERROR_HANDLER(err_code);
                 break;
         }
@@ -316,13 +317,13 @@ static void on_hts_evt(ble_hts_t * p_hts, ble_hts_evt_t * p_evt)
     switch (p_evt->evt_type)
     {
         case BLE_HTS_EVT_INDICATION_ENABLED:
-            SEGGER_RTT_printf(0, "BLE_HTS_EVT_INDICATION_ENABLED\n");
+            SEGGER_RTT_printf(0, "received BLE_HTS_EVT_INDICATION_ENABLED\n");
             // Indication has been enabled, send a single temperature measurement
             temperature_measurement_update();
             break;
 
         case BLE_HTS_EVT_INDICATION_CONFIRMED:
-            SEGGER_RTT_printf(0, "BLE_HTS_EVT_INDICATION_CONFIRMED\n");
+            SEGGER_RTT_printf(0, "received BLE_HTS_EVT_INDICATION_CONFIRMED\n");
             m_hts_meas_ind_conf_pending = false;
             break;
 
