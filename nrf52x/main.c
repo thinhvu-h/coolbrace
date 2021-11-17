@@ -92,7 +92,7 @@ int main(void)
 
     pwr_mgmt_init();
     twi_master_init();
-    // battery_init();
+    battery_init();
 
     timers_init();
     buttons_leds_init(&erase_bonds);

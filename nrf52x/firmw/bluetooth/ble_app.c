@@ -3,7 +3,7 @@
 #include "sensorsim.h"
 
 static uint16_t          m_conn_handle = BLE_CONN_HANDLE_INVALID;                   /**< Handle of the current connection. */
-static bool              m_hts_meas_ind_conf_pending = false;                       /**< Flag to keep track of when an indication confirmation is pending. */
+static bool              m_hts_meas_ind_conf_pending = true;                       /**< Flag to keep track of when an indication confirmation is pending. */
 
 BLE_CUS_DEF(m_cus);                                                                 /**< Custom Service instance. */
 // BLE_LBS_DEF(m_lbs);                                                                 /**< LED Button Service instance. */
@@ -17,7 +17,6 @@ static ble_uuid_t m_adv_uuids[] =                                               
 {
     {BLE_UUID_DEVICE_INFORMATION_SERVICE, BLE_UUID_TYPE_BLE}
 };
-
 
 #define MIN_BATTERY_LEVEL                   81                                      /**< Minimum simulated battery level. */
 #define MAX_BATTERY_LEVEL                   100                                     /**< Maximum simulated battery level. */
@@ -208,7 +207,6 @@ static void pm_evt_handler(pm_evt_t const * p_evt)
             if (is_indication_enabled)
             {
                 m_hts_meas_ind_conf_pending = false;
-                temperature_measurement_update();
             }
             break;
 
@@ -319,7 +317,8 @@ static void on_hts_evt(ble_hts_t * p_hts, ble_hts_evt_t * p_evt)
         case BLE_HTS_EVT_INDICATION_ENABLED:
             SEGGER_RTT_printf(0, "received BLE_HTS_EVT_INDICATION_ENABLED\n");
             // Indication has been enabled, send a single temperature measurement
-            temperature_measurement_update();
+            // temperature_measurement_update();
+            m_hts_meas_ind_conf_pending = false;
             break;
 
         case BLE_HTS_EVT_INDICATION_CONFIRMED:
@@ -346,22 +345,6 @@ static void nrf_qwr_error_handler(uint32_t nrf_error)
     APP_ERROR_HANDLER(nrf_error);
 }
 
-/**@brief Function for handling write events to the LED characteristic.
- *
- * @param[in] p_lbs     Instance of LED Button Service to which the write applies.
- * @param[in] led_state Written/desired state of the LED.
- */
-// static void led_write_handler(uint16_t conn_handle, ble_lbs_t * p_lbs, uint8_t led_state)
-// {
-//     SEGGER_RTT_printf(0, "\nled_state: %d\n", led_state);
-    // if (led_state)
-    // {
-    //     m_hts_meas_ind_conf_pending = false;
-    //     // Indication has been enabled, send a single temperature measurement
-    //     temperature_measurement_update();
-    // }
-// }
-
 /**@brief Function for initializing services that will be used by the application.
  *
  * @details Initialize the Health Thermometer, Battery and Device Information services.
@@ -373,7 +356,6 @@ void services_init(void)
     ble_bas_init_t     bas_init;
     ble_dis_init_t     dis_init;
     ble_cus_init_t     cus_init;
-    // ble_lbs_init_t     lbs_init = {0};
     nrf_ble_qwr_init_t qwr_init = {0};
     ble_dis_sys_id_t   sys_id;
 
@@ -412,12 +394,6 @@ void services_init(void)
 
     err_code = ble_bas_init(&m_bas, &bas_init);
     APP_ERROR_CHECK(err_code);
-
-    // Initialize LBS. // make use of led_write_handler to set PWM level
-    // lbs_init.led_write_handler = led_write_handler;
-
-    // err_code = ble_lbs_init(&m_lbs, &lbs_init);
-    // APP_ERROR_CHECK(err_code);
 
     // Initialize CUS Service init structure to zero.
     cus_init.evt_handler                = on_cus_evt;
