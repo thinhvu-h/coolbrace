@@ -33,6 +33,7 @@
 #include "battery_app.h"
 #include "temperature_app.h"
 #include "ble_cus.h"
+#include "gpio_app.h"
 
 #define DEVICE_NAME                     "coolbrace"                                 /**< Name of device. Will be included in the advertising data. */
 #define MANUFACTURER_NAME               "coolbrace"                                 /**< Manufacturer. Will be passed to Device Information Service. */

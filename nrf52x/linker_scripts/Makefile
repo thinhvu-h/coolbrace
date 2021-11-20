@@ -21,6 +21,7 @@ SRC_FILES += \
 	$(SDK_ROOT)/components/libraries/util/app_error.c \
 	$(SDK_ROOT)/components/libraries/util/app_error_handler_gcc.c \
 	$(SDK_ROOT)/components/libraries/util/app_error_weak.c \
+	$(SDK_ROOT)/components/libraries/pwm/app_pwm.c \
 	$(SDK_ROOT)/components/libraries/scheduler/app_scheduler.c \
 	$(SDK_ROOT)/components/libraries/timer/app_timer.c \
 	$(SDK_ROOT)/components/libraries/util/app_util_platform.c \
@@ -47,10 +48,14 @@ SRC_FILES += \
 	$(SDK_ROOT)/integration/nrfx/legacy/nrf_drv_clock.c \
 	$(SDK_ROOT)/modules/nrfx/soc/nrfx_atomic.c \
 	$(SDK_ROOT)/modules/nrfx/drivers/src/nrfx_clock.c \
+	$(SDK_ROOT)/integration/nrfx/legacy/nrf_drv_ppi.c \
 	$(SDK_ROOT)/integration/nrfx/legacy/nrf_drv_twi.c \
 	$(SDK_ROOT)/modules/nrfx/drivers/src/nrfx_saadc.c \
 	$(SDK_ROOT)/modules/nrfx/drivers/src/nrfx_gpiote.c \
+	$(SDK_ROOT)/modules/nrfx/drivers/src/nrfx_ppi.c \
+	$(SDK_ROOT)/modules/nrfx/drivers/src/nrfx_timer.c \
 	$(SDK_ROOT)/modules/nrfx/drivers/src/prs/nrfx_prs.c \
+	$(SDK_ROOT)/modules/nrfx/drivers/src/nrfx_pwm.c \
 	$(SDK_ROOT)/modules/nrfx/drivers/src/nrfx_twi.c \
   	$(SDK_ROOT)/modules/nrfx/drivers/src/nrfx_twim.c \
 	$(SDK_ROOT)/components/libraries/bsp/bsp.c \
@@ -59,6 +64,8 @@ SRC_FILES += \
 	$(PROJ_DIR)/firmw/bluetooth/ble_cus.c \
 	$(PROJ_DIR)/firmw/bluetooth/ble_app.c \
 	$(PROJ_DIR)/firmw/battery/battery_app.c \
+	$(PROJ_DIR)/firmw/gpio/gpio_app.c \
+	$(PROJ_DIR)/firmw/gpio/cooling_app.c \
 	$(PROJ_DIR)/main.c \
 	$(SDK_ROOT)/components/libraries/bootloader/dfu/nrf_dfu_svci.c \
 	$(SDK_ROOT)/external/segger_rtt/SEGGER_RTT.c \
@@ -231,6 +238,7 @@ INC_FOLDERS += \
 	$(SDK_ROOT)/components/nfc/ndef/conn_hand_parser/ac_rec_parser \
 	$(SDK_ROOT)/components/libraries/stack_guard \
 	$(SDK_ROOT)/components/libraries/log/src \
+	$(PROJ_DIR)/firmw/gpio \
 	$(PROJ_DIR)/firmw/bluetooth \
 	$(PROJ_DIR)/firmw/battery \
     $(PROJ_DIR)/firmw/temperature \

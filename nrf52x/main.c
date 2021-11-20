@@ -18,6 +18,8 @@
 #include "twi_nrf52.h"
 #include "SEGGER_RTT.h"
 
+#include "gpio_app.h"
+
 APP_TIMER_DEF(m_battery_timer_id);                                                  /**< Battery timer. */
 APP_TIMER_DEF(m_temperature_timer_id);                                              /**< Temperature timer. */
 APP_TIMER_DEF(m_notification_timer_id);
@@ -93,8 +95,10 @@ int main(void)
     pwr_mgmt_init();
     twi_master_init();
     battery_init();
-
+    
     timers_init();
+    gpio_configure();
+    pwm_init();
     buttons_leds_init(&erase_bonds);
     ble_stack_init();
     gap_params_init();

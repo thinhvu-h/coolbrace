@@ -699,6 +699,7 @@ static void bsp_event_handler(bsp_event_t event)
             break;
 
         case BSP_EVENT_KEY_0:
+            SEGGER_RTT_printf(0, "\nButton BSP_EVENT_KEY_0 : %d\n", BSP_EVENT_KEY_0);
             // if (m_conn_handle != BLE_CONN_HANDLE_INVALID)
             // {
             //     temperature_measurement_send();
