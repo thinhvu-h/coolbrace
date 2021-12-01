@@ -1,5 +1,5 @@
-#ifndef BLE_APP_ADV_CFG_H_
-#define BLE_APP_ADV_CFG_H_
+#ifndef BLE_APP_H_
+#define BLE_APP_H_
 
 #include <stdint.h>
 #include <string.h>
@@ -30,9 +30,19 @@
 #include "nrf_ble_qwr.h"
 #include "nrf_delay.h"
 
-#include "battery_app.h"
-#include "temperature_app.h"
-#include "ble_cus.h"
+#include "app_scheduler.h"
+
+#include "nrf_pwr_mgmt.h"
+
+#include "ble_dfu.h"
+#include "nrf_power.h"
+#include "nrf_bootloader_info.h"
+
+#include "nrf_dfu_ble_svci_bond_sharing.h"
+#include "nrf_svci_async_function.h"
+#include "nrf_svci_async_handler.h"
+
+#define SW_VERSION                      "1.0.0"
 
 #define DEVICE_NAME                     "coolbrace"                                 /**< Name of device. Will be included in the advertising data. */
 #define MANUFACTURER_NAME               "coolbrace"                                 /**< Manufacturer. Will be passed to Device Information Service. */
@@ -45,9 +55,7 @@
 
 #define APP_ADV_INTERVAL                40                                          /**< The advertising interval (in units of 0.625 ms. This value corresponds to 25 ms). */
 
-#define APP_ADV_DURATION                18000                                       /**< The advertising duration (180 seconds) in units of 10 milliseconds. */
-
-#define TEMP_TYPE_AS_CHARACTERISTIC     0                                           /**< Determines if temperature type is given as characteristic (1) or as a field of measurement (0). */
+#define APP_ADV_DURATION                6000                                       /**< The advertising duration (180 seconds) in units of 10 milliseconds. */
 
 #define MIN_CELCIUS_DEGREES             3688                                        /**< Minimum temperature in celcius for use in the simulated measurement function (multiplied by 100 to avoid floating point arithmetic). */
 #define MAX_CELCIUS_DEGRESS             3972                                        /**< Maximum temperature in celcius for use in the simulated measurement function (multiplied by 100 to avoid floating point arithmetic). */
@@ -75,13 +83,16 @@
 
 #define DEAD_BEEF                       0xDEADBEEF                                  /**< Value used as error code on stack dump, can be used to identify stack location on stack unwind. */
 
-extern void buttons_leds_init(bool * p_erase_bonds);
+// Scheduler settings
+#define SCHED_MAX_EVENT_DATA_SIZE       sizeof(app_timer_event_t)  //the maximum size of events to be passed through the scheduler.
+#define SCHED_QUEUE_SIZE                20  //the maximum number of entries in scheduler queue.
+
+extern void advertising_start();
 extern void gatt_init(void);
 extern void services_init(void);
 extern void ble_stack_init(void);
 extern void advertising_init(void);
 extern void gap_params_init(void);
-extern void advertising_start(bool erase_bonds);
 extern void conn_params_init(void);
 extern void peer_manager_init(void);
 
@@ -90,7 +101,8 @@ extern void notification_timeout_handler(void * p_context);
 extern void battery_timeout_handler(void * p_context);
 extern void temperature_timeout_handler(void * p_context);
 
-//
-extern void sensor_simulator_init(void);
+APP_TIMER_DEF(m_battery_timer_id);                                                  /**< Battery timer. */
+APP_TIMER_DEF(m_temperature_timer_id);                                              /**< Temperature timer. */
+APP_TIMER_DEF(m_notification_timer_id);
 
-#endif /*BLE_APP_ADV_CFG_H_*/
+#endif /*BLE_APP_H_*/

@@ -14,13 +14,18 @@
 #include "nrf_drv_ppi.h"
 
 #include "nrf_pwr_mgmt.h"
-#include "ble_app.h"
 #include "twi_nrf52.h"
-#include "SEGGER_RTT.h"
 
-APP_TIMER_DEF(m_battery_timer_id);                                                  /**< Battery timer. */
-APP_TIMER_DEF(m_temperature_timer_id);                                              /**< Temperature timer. */
-APP_TIMER_DEF(m_notification_timer_id);
+#include "ble_app.h"
+#include "ble_cus.h"
+
+#include "gpio_app.h"
+#include "battery_app.h"
+#include "temperature_app.h"
+
+#include "nrf_log.h"
+#include "nrf_log_ctrl.h"
+#include "nrf_log_default_backends.h"
 
 /**@brief Function for starting application timers.
  */
@@ -41,14 +46,10 @@ static void application_timers_start(void)
 /**@brief Function for doing power management. */
 static void idle_state_handle(void)
 {
-    nrf_pwr_mgmt_run();
-}
-
-/**@brief Function for initializing the power management module. */
-static void pwr_mgmt_init(void)
-{
-    ret_code_t err_code = nrf_pwr_mgmt_init();
-    APP_ERROR_CHECK(err_code);
+    if (NRF_LOG_PROCESS() == false)
+    {
+        nrf_pwr_mgmt_run();
+    }
 }
 
 /**@brief Function for the Timer initialization.
@@ -82,35 +83,64 @@ static void timers_init(void)
     APP_ERROR_CHECK(err_code);
 }
 
+static void power_management_init(void)
+{
+    uint32_t err_code = nrf_pwr_mgmt_init();
+    APP_ERROR_CHECK(err_code);
+}
+
+static void log_init(void)
+{
+    ret_code_t err_code = NRF_LOG_INIT(NULL);
+    APP_ERROR_CHECK(err_code);
+
+    NRF_LOG_DEFAULT_BACKENDS_INIT();
+}
+
+/**@brief Function for the Event Scheduler initialization.
+ */
+static void scheduler_init(void)
+{
+    APP_SCHED_INIT(SCHED_MAX_EVENT_DATA_SIZE, SCHED_QUEUE_SIZE);
+}
+
 /**
  * @brief Function for application main entry.
  */
 
 int main(void)
 {
-    bool erase_bonds;
+    NRF_LOG_INFO("### START COOLBRACE ###");
+    // ret_code_t err_code;
 
-    pwr_mgmt_init();
+    log_init();
     twi_master_init();
     battery_init();
 
+    // Initialize the async SVCI interface to bootloader before any interrupts are enabled.
+    // err_code = ble_dfu_buttonless_async_svci_init();
+    // APP_ERROR_CHECK(err_code);
+
     timers_init();
-    buttons_leds_init(&erase_bonds);
+    gpio_configure();
+    pwm_app_init();
+    power_management_init();
+    scheduler_init();
     ble_stack_init();
     gap_params_init();
     gatt_init();
     advertising_init();
     services_init();
-    sensor_simulator_init();
     conn_params_init();
     peer_manager_init();
 
     application_timers_start();
-    advertising_start(erase_bonds);
-    SEGGER_RTT_printf(0, "\nStart bluetooth...\n");
+    advertising_start();
+    NRF_LOG_INFO("Start bluetooth...");
 
 	while(1)
 	{
+        app_sched_execute();
 		idle_state_handle();
 	}
 }

@@ -1,5 +1,5 @@
 #include "ble_cus.h"
-#include "SEGGER_RTT.h"
+#include "gpio_app.h"
 
 /**@brief Function for handling the Connect event.
  *
@@ -48,24 +48,7 @@ static void on_write(ble_cus_t * p_cus, ble_evt_t const * p_ble_evt)
     // Custom Value Characteristic Written to.
     if (p_evt_write->handle == p_cus->custom_value_handles.value_handle)
     {
-        SEGGER_RTT_printf(0, "received custom data: %d\n", *p_evt_write->data);
-        // 17 18 19 20
-        if(*p_evt_write->data == 0x02)
-        {
-            // nrf_gpio_pin_clear(20); 
-            nrf_gpio_pin_set(18);
-            nrf_gpio_pin_clear(20);
-        }
-        else if(*p_evt_write->data == 0x03)
-        {
-            // nrf_gpio_pin_set(20); 
-            nrf_gpio_pin_set(20);
-            nrf_gpio_pin_clear(18);
-        }
-        else
-        {
-          //Do nothing
-        }
+        cooling_handler(*p_evt_write->data);
     }
 
     // Check if the Custom value CCCD is written to and that the value is the appropriate length, i.e 2 bytes.
@@ -97,7 +80,6 @@ void ble_cus_on_ble_evt( ble_evt_t const * p_ble_evt, void * p_context)
 {
     ble_cus_t * p_cus = (ble_cus_t *) p_context;
     
-    NRF_LOG_INFO("BLE event received. Event type = %d\r\n", p_ble_evt->header.evt_id); 
     if (p_cus == NULL || p_ble_evt == NULL)
     {
         return;
@@ -180,7 +162,7 @@ static uint32_t custom_value_char_add(ble_cus_t * p_cus, const ble_cus_init_t * 
 
     attr_char_value.p_uuid    = &ble_uuid;
     attr_char_value.p_attr_md = &attr_md;
-    attr_char_value.init_len  = sizeof(uint8_t);
+    attr_char_value.init_len  = sizeof(uint32_t);
     attr_char_value.init_offs = 0;
     attr_char_value.max_len   = sizeof(uint32_t);
 
@@ -230,7 +212,6 @@ uint32_t ble_cus_init(ble_cus_t * p_cus, const ble_cus_init_t * p_cus_init)
 
 uint32_t ble_cus_custom_value_update(ble_cus_t * p_cus, uint8_t custom_value)
 {
-    NRF_LOG_INFO("In ble_cus_custom_value_update. \r\n"); 
     if (p_cus == NULL)
     {
         return NRF_ERROR_NULL;
@@ -268,10 +249,8 @@ uint32_t ble_cus_custom_value_update(ble_cus_t * p_cus, uint8_t custom_value)
         hvx_params.p_data = gatts_value.p_value;
 
         err_code = sd_ble_gatts_hvx(p_cus->conn_handle, &hvx_params);
-        NRF_LOG_INFO("sd_ble_gatts_hvx result: %x. \r\n", err_code); 
     } else {
         err_code = NRF_ERROR_INVALID_STATE;
-        NRF_LOG_INFO("sd_ble_gatts_hvx result: NRF_ERROR_INVALID_STATE. \r\n"); 
     }
     return err_code;
 }

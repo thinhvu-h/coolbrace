@@ -1,16 +1,17 @@
 PROJECT_NAME     := coolbrace
-TARGETS          := nrf52832_xxaa
+TARGETS          := nrf52805_xxaa
 OUTPUT_DIRECTORY := ../_build
 
-SDK_ROOT := ../../../Softdev/nRF5_SDK_15.3.0_59ac345
+SDK_ROOT := ../../../Softdev/nRF5_SDK_17.1.0_ddde560
 PROJ_DIR := ..
 
-$(OUTPUT_DIRECTORY)/nrf52832_xxaa.out: \
-  LINKER_SCRIPT  := armgcc_s132_nrf52832_xxaa.ld
+
+$(OUTPUT_DIRECTORY)/nrf52805_xxaa.out: \
+  LINKER_SCRIPT  := armgcc_s112_nrf52805_xxaa.ld
 
 # Source files common to all targets
 SRC_FILES += \
-	$(SDK_ROOT)/modules/nrfx/mdk/gcc_startup_nrf52.S \
+	$(SDK_ROOT)/modules/nrfx/mdk/gcc_startup_nrf52805.S \
 	$(SDK_ROOT)/components/libraries/log/src/nrf_log_backend_rtt.c \
 	$(SDK_ROOT)/components/libraries/log/src/nrf_log_backend_serial.c \
 	$(SDK_ROOT)/components/libraries/log/src/nrf_log_backend_uart.c \
@@ -21,12 +22,13 @@ SRC_FILES += \
 	$(SDK_ROOT)/components/libraries/util/app_error.c \
 	$(SDK_ROOT)/components/libraries/util/app_error_handler_gcc.c \
 	$(SDK_ROOT)/components/libraries/util/app_error_weak.c \
+	$(SDK_ROOT)/components/libraries/pwm/app_pwm.c \
 	$(SDK_ROOT)/components/libraries/scheduler/app_scheduler.c \
 	$(SDK_ROOT)/components/libraries/timer/app_timer.c \
 	$(SDK_ROOT)/components/libraries/util/app_util_platform.c \
 	$(SDK_ROOT)/components/libraries/hardfault/hardfault_implementation.c \
 	$(SDK_ROOT)/components/libraries/crc16/crc16.c \
- 	$(SDK_ROOT)/components/libraries/fds/fds.c \
+	$(SDK_ROOT)/components/libraries/fds/fds.c \
 	$(SDK_ROOT)/components/libraries/util/nrf_assert.c \
 	$(SDK_ROOT)/components/libraries/atomic_fifo/nrf_atfifo.c \
 	$(SDK_ROOT)/components/libraries/atomic_flags/nrf_atflags.c \
@@ -35,30 +37,37 @@ SRC_FILES += \
 	$(SDK_ROOT)/external/fprintf/nrf_fprintf.c \
 	$(SDK_ROOT)/external/fprintf/nrf_fprintf_format.c \
 	$(SDK_ROOT)/components/libraries/fstorage/nrf_fstorage.c \
-  	$(SDK_ROOT)/components/libraries/fstorage/nrf_fstorage_sd.c \
+	$(SDK_ROOT)/components/libraries/fstorage/nrf_fstorage_sd.c \
 	$(SDK_ROOT)/components/libraries/memobj/nrf_memobj.c \
 	$(SDK_ROOT)/components/libraries/pwr_mgmt/nrf_pwr_mgmt.c \
+	$(SDK_ROOT)/components/libraries/queue/nrf_queue.c \
 	$(SDK_ROOT)/components/libraries/ringbuf/nrf_ringbuf.c \
 	$(SDK_ROOT)/components/libraries/experimental_section_vars/nrf_section_iter.c \
 	$(SDK_ROOT)/components/libraries/strerror/nrf_strerror.c \
 	$(SDK_ROOT)/components/libraries/sensorsim/sensorsim.c \
-	$(SDK_ROOT)/modules/nrfx/mdk/system_nrf52.c \
+	$(SDK_ROOT)/modules/nrfx/mdk/system_nrf52805.c \
 	$(SDK_ROOT)/components/boards/boards.c \
 	$(SDK_ROOT)/integration/nrfx/legacy/nrf_drv_clock.c \
+	$(SDK_ROOT)/integration/nrfx/legacy/nrf_drv_ppi.c \
 	$(SDK_ROOT)/modules/nrfx/soc/nrfx_atomic.c \
 	$(SDK_ROOT)/modules/nrfx/drivers/src/nrfx_clock.c \
 	$(SDK_ROOT)/integration/nrfx/legacy/nrf_drv_twi.c \
 	$(SDK_ROOT)/modules/nrfx/drivers/src/nrfx_saadc.c \
 	$(SDK_ROOT)/modules/nrfx/drivers/src/nrfx_gpiote.c \
+	$(SDK_ROOT)/modules/nrfx/drivers/src/nrfx_ppi.c \
+	$(SDK_ROOT)/modules/nrfx/drivers/src/nrfx_timer.c \
 	$(SDK_ROOT)/modules/nrfx/drivers/src/prs/nrfx_prs.c \
 	$(SDK_ROOT)/modules/nrfx/drivers/src/nrfx_twi.c \
-  	$(SDK_ROOT)/modules/nrfx/drivers/src/nrfx_twim.c \
+	$(SDK_ROOT)/modules/nrfx/drivers/src/nrfx_twim.c \
 	$(SDK_ROOT)/components/libraries/bsp/bsp.c \
 	$(SDK_ROOT)/components/libraries/bsp/bsp_btn_ble.c \
 	$(PROJ_DIR)/firmw/drivers/twi_nrf52.c \
 	$(PROJ_DIR)/firmw/bluetooth/ble_cus.c \
 	$(PROJ_DIR)/firmw/bluetooth/ble_app.c \
 	$(PROJ_DIR)/firmw/battery/battery_app.c \
+	$(PROJ_DIR)/firmw/temperature/temperature_app.c \
+	$(PROJ_DIR)/firmw/gpio/gpio_app.c \
+	$(PROJ_DIR)/firmw/gpio/cooling_app.c \
 	$(PROJ_DIR)/main.c \
 	$(SDK_ROOT)/components/libraries/bootloader/dfu/nrf_dfu_svci.c \
 	$(SDK_ROOT)/external/segger_rtt/SEGGER_RTT.c \
@@ -66,9 +75,9 @@ SRC_FILES += \
 	$(SDK_ROOT)/external/segger_rtt/SEGGER_RTT_printf.c \
 	$(SDK_ROOT)/components/ble/peer_manager/auth_status_tracker.c \
 	$(SDK_ROOT)/components/ble/common/ble_advdata.c \
-  	$(SDK_ROOT)/components/ble/ble_advertising/ble_advertising.c \
+	$(SDK_ROOT)/components/ble/ble_advertising/ble_advertising.c \
 	$(SDK_ROOT)/components/ble/common/ble_conn_params.c \
-  	$(SDK_ROOT)/components/ble/common/ble_conn_state.c \
+	$(SDK_ROOT)/components/ble/common/ble_conn_state.c \
 	$(SDK_ROOT)/components/ble/common/ble_srv_common.c \
 	$(SDK_ROOT)/components/ble/peer_manager/gatt_cache_manager.c \
 	$(SDK_ROOT)/components/ble/peer_manager/gatts_cache_manager.c \
@@ -84,8 +93,9 @@ SRC_FILES += \
 	$(SDK_ROOT)/components/ble/peer_manager/security_dispatcher.c \
 	$(SDK_ROOT)/components/ble/peer_manager/security_manager.c \
 	$(SDK_ROOT)/components/ble/ble_services/ble_dfu/ble_dfu.c \
-  	$(SDK_ROOT)/components/ble/ble_services/ble_dfu/ble_dfu_bonded.c \
-  	$(SDK_ROOT)/components/ble/ble_services/ble_dfu/ble_dfu_unbonded.c \
+	$(SDK_ROOT)/components/ble/ble_services/ble_dfu/ble_dfu_bonded.c \
+	$(SDK_ROOT)/components/ble/ble_services/ble_dfu/ble_dfu_unbonded.c \
+	$(SDK_ROOT)/components/ble/nrf_ble_gq/nrf_ble_gq.c \
 	$(SDK_ROOT)/external/utf_converter/utf.c \
 	$(SDK_ROOT)/components/ble/ble_services/ble_dis/ble_dis.c \
 	$(SDK_ROOT)/components/ble/ble_services/ble_hts/ble_hts.c \
@@ -104,7 +114,7 @@ INC_FOLDERS += \
 	$(SDK_ROOT)/components/ble/ble_services/ble_ancs_c \
 	$(SDK_ROOT)/components/ble/ble_services/ble_ias_c \
 	$(SDK_ROOT)/components/libraries/pwm \
-	$(SDK_ROOT)/components/softdevice/s132/headers/nrf52 \
+	$(SDK_ROOT)/components/softdevice/s112/headers/nrf52 \
 	$(SDK_ROOT)/components/libraries/usbd/class/cdc/acm \
 	$(SDK_ROOT)/components/libraries/usbd/class/hid/generic \
 	$(SDK_ROOT)/components/libraries/usbd/class/msc \
@@ -131,6 +141,7 @@ INC_FOLDERS += \
 	$(SDK_ROOT)/components/ble/ble_services/ble_hrs_c \
 	$(SDK_ROOT)/components/nfc/ndef/connection_handover/le_oob_rec \
 	$(SDK_ROOT)/components/libraries/queue \
+	$(SDK_ROOT)/components/libraries/queue \
 	$(SDK_ROOT)/components/libraries/pwr_mgmt \
 	$(SDK_ROOT)/components/ble/ble_dtm \
 	$(SDK_ROOT)/components/toolchain/cmsis/include \
@@ -142,7 +153,7 @@ INC_FOLDERS += \
 	$(SDK_ROOT)/components/ble/ble_services/ble_bas \
 	$(SDK_ROOT)/components/libraries/mpu \
 	$(SDK_ROOT)/components/libraries/experimental_section_vars \
-	$(SDK_ROOT)/components/softdevice/s132/headers \
+	$(SDK_ROOT)/components/softdevice/s112/headers \
 	$(SDK_ROOT)/components/ble/ble_services/ble_ans_c \
 	$(SDK_ROOT)/components/libraries/slip \
 	$(SDK_ROOT)/components/libraries/delay \
@@ -205,7 +216,7 @@ INC_FOLDERS += \
 	$(SDK_ROOT)/components/ble/ble_services/ble_dis \
 	$(SDK_ROOT)/components/nfc/ndef/uri \
 	$(SDK_ROOT)/components/ble/nrf_ble_gatt \
-  	$(SDK_ROOT)/components/ble/nrf_ble_qwr \
+	$(SDK_ROOT)/components/ble/nrf_ble_qwr \
 	$(SDK_ROOT)/components/nfc/t4t_parser/cc_file \
 	$(SDK_ROOT)/components/ble/nrf_ble_qwr \
 	$(SDK_ROOT)/components/libraries/gfx \
@@ -231,9 +242,12 @@ INC_FOLDERS += \
 	$(SDK_ROOT)/components/nfc/ndef/conn_hand_parser/ac_rec_parser \
 	$(SDK_ROOT)/components/libraries/stack_guard \
 	$(SDK_ROOT)/components/libraries/log/src \
+	$(SDK_ROOT)/components/libraries/log \
+	$(SDK_ROOT)/components/ble/nrf_ble_gq \
 	$(PROJ_DIR)/firmw/bluetooth \
 	$(PROJ_DIR)/firmw/battery \
-    $(PROJ_DIR)/firmw/temperature \
+	$(PROJ_DIR)/firmw/temperature \
+	$(PROJ_DIR)/firmw/gpio \
 	$(PROJ_DIR)/firmw/drivers
 
 # Libraries common to all targets
@@ -255,16 +269,15 @@ OPT = -O1 -g3
 
 # C flags common to all targets
 CFLAGS += $(OPT)
-CFLAGS += -DBOARD_PCA10040
-CFLAGS += -DCONFIG_GPIO_AS_PINRESET
+CFLAGS += -DDEBUG
+CFLAGS += -DBOARD_COOLBRACE
 CFLAGS += -DFLOAT_ABI_SOFT
-CFLAGS += -DNRF52
-CFLAGS += -DNRF52832_XXAA
+CFLAGS += -DNRF52805_XXAA
 CFLAGS += -DNRF52_PAN_74
 CFLAGS += -DNRF_DFU_SVCI_ENABLED
 CFLAGS += -DNRF_DFU_TRANSPORT_BLE=1
-CFLAGS += -DNRF_SD_BLE_API_VERSION=6
-CFLAGS += -DS132
+CFLAGS += -DNRF_SD_BLE_API_VERSION=7
+CFLAGS += -DS112
 CFLAGS += -DSOFTDEVICE_PRESENT
 CFLAGS += -DSWI_DISABLE0
 CFLAGS += -mcpu=cortex-m4
@@ -283,16 +296,14 @@ ASMFLAGS += -g3
 ASMFLAGS += -mcpu=cortex-m4
 ASMFLAGS += -mthumb -mabi=aapcs
 ASMFLAGS += -mfloat-abi=soft
-ASMFLAGS += -DBOARD_PCA10040
-ASMFLAGS += -DCONFIG_GPIO_AS_PINRESET
+ASMFLAGS += -DBOARD_COOLBRACE
 ASMFLAGS += -DFLOAT_ABI_SOFT
-ASMFLAGS += -DNRF52
-ASMFLAGS += -DNRF52832_XXAA
+ASMFLAGS += -DNRF52805_XXAA
 ASMFLAGS += -DNRF52_PAN_74
 ASMFLAGS += -DNRF_DFU_SVCI_ENABLED
 ASMFLAGS += -DNRF_DFU_TRANSPORT_BLE=1
-ASMFLAGS += -DNRF_SD_BLE_API_VERSION=6
-ASMFLAGS += -DS132
+ASMFLAGS += -DNRF_SD_BLE_API_VERSION=7
+ASMFLAGS += -DS112
 ASMFLAGS += -DSOFTDEVICE_PRESENT
 ASMFLAGS += -DSWI_DISABLE0
 
@@ -313,12 +324,12 @@ LIB_FILES += -lc -lnosys -lm
 .PHONY: default help
 
 # Default target - first one defined
-default: nrf52832_xxaa
+default: nrf52805_xxaa
 
 # Print all targets that can be built
 help:
 	@echo following targets are available:
-	@echo		nrf52832_xxaa
+	@echo		nrf52805_xxaa
 	@echo		flash_softdevice
 	@echo		sdk_config - starting external tool for editing sdk_config.h
 	@echo		flash      - flashing binary
@@ -333,15 +344,15 @@ $(foreach target, $(TARGETS), $(call define_target, $(target)))
 .PHONY: flash flash_softdevice erase
 
 # Flash the program
-flash: $(OUTPUT_DIRECTORY)/nrf52832_xxaa.hex
+flash: $(OUTPUT_DIRECTORY)/nrf52805_xxaa.hex
 	@echo Flashing: $<
 	nrfjprog -f nrf52 --program $< --sectorerase
 	nrfjprog -f nrf52 --reset
 
 # Flash softdevice
 flash_softdevice:
-	@echo Flashing: s132_nrf52_6.1.1_softdevice.hex
-	nrfjprog -f nrf52 --program $(PROJ_DIR)/softdevice/s132_nrf52_6.1.1_softdevice.hex --sectorerase
+	@echo Flashing: s112_nrf52_7.2.0_softdevice.hex
+	nrfjprog -f nrf52 --program $(PROJ_DIR)/softdevice/s112_nrf52_7.2.0_softdevice.hex --sectorerase
 	nrfjprog -f nrf52 --reset
 
 #erase all
@@ -351,9 +362,9 @@ erase:
 #flash all
 flash_all:
 	nrfjprog -f nrf52 --eraseall
-	nrfjprog -f nrf52 --program $(PROJ_DIR)/softdevice/s132_nrf52_6.1.1_softdevice.hex --sectorerase
+	nrfjprog -f nrf52 --program $(PROJ_DIR)/softdevice/s112_nrf52_7.2.0_softdevice.hex --sectorerase
 	nrfjprog -f nrf52 --reset
-	nrfjprog -f nrf52 --program $(OUTPUT_DIRECTORY)/nrf52832_xxaa.hex --sectorerase
+	nrfjprog -f nrf52 --program $(OUTPUT_DIRECTORY)/nrf52805_xxaa.hex --sectorerase
 	nrfjprog -f nrf52 --reset
 
 SDK_CONFIG_FILE := ../config/sdk_config.h
