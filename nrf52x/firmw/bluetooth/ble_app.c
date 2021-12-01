@@ -1,9 +1,14 @@
 #include "ble_app.h"
-#include "SEGGER_RTT.h"
-#include "sensorsim.h"
+#include "gpio_app.h"
+#include "battery_app.h"
+#include "temperature_app.h"
+#include "ble_cus.h"
 
-static uint16_t          m_conn_handle = BLE_CONN_HANDLE_INVALID;                   /**< Handle of the current connection. */
-static bool              m_hts_meas_ind_conf_pending = true;                       /**< Flag to keep track of when an indication confirmation is pending. */
+#include "nrf_log.h"
+
+static uint16_t          m_conn_handle = BLE_CONN_HANDLE_INVALID;         /**< Handle of the current connection. */
+static bool              m_hts_meas_ind_conf_pending = true;              /**< Flag to keep track of when an indication confirmation is pending. */
+static bool              m_bas_notif_enable = false;                       /**< Flag to keep track of when an notify is enable. */
 
 BLE_CUS_DEF(m_cus);                                                                 /**< Custom Service instance. */
 // BLE_LBS_DEF(m_lbs);                                                                 /**< LED Button Service instance. */
@@ -12,43 +17,24 @@ BLE_BAS_DEF(m_bas);                                                             
 NRF_BLE_GATT_DEF(m_gatt);                                                           /**< GATT module instance. */
 NRF_BLE_QWR_DEF(m_qwr);                                                             /**< Context for the Queued Write module.*/
 BLE_ADVERTISING_DEF(m_advertising);                                                 /**< Advertising module instance. */
+NRF_BLE_GQ_DEF(m_ble_gatt_queue,                                                    /**< BLE GATT Queue instance. */
+               NRF_SDH_BLE_PERIPHERAL_LINK_COUNT,
+               NRF_BLE_GQ_QUEUE_SIZE);
 
 static ble_uuid_t m_adv_uuids[] =                                                   /**< Universally unique service identifiers. */
 {
     {BLE_UUID_DEVICE_INFORMATION_SERVICE, BLE_UUID_TYPE_BLE}
 };
 
-#define MIN_BATTERY_LEVEL                   81                                      /**< Minimum simulated battery level. */
-#define MAX_BATTERY_LEVEL                   100                                     /**< Maximum simulated battery level. */
-#define BATTERY_LEVEL_INCREMENT             1                                       /**< Increment between each simulated battery level measurement. */
-
-#define MIN_CELCIUS_DEGREES             3688                                        /**< Minimum temperature in celcius for use in the simulated measurement function (multiplied by 100 to avoid floating point arithmetic). */
-#define MAX_CELCIUS_DEGRESS             3972                                        /**< Maximum temperature in celcius for use in the simulated measurement function (multiplied by 100 to avoid floating point arithmetic). */
-#define CELCIUS_DEGREES_INCREMENT       36                                          /**< Value by which temperature is incremented/decremented for each call to the simulated measurement function (multiplied by 100 to avoid floating point arithmetic). */
-
-static sensorsim_cfg_t   m_battery_sim_cfg;     /**< Battery Level sensor simulator configuration. */
-static sensorsim_state_t m_battery_sim_state;   /**< Battery Level sensor simulator state. */
-static sensorsim_cfg_t   m_temp_celcius_sim_cfg;    /**< Temperature simulator configuration. */
-static sensorsim_state_t m_temp_celcius_sim_state;  /**< Temperature simulator state. */
-
-/**@brief Function for initializing the sensor simulators.
- */
-void sensor_simulator_init(void)
+typedef enum
 {
-    m_battery_sim_cfg.min          = MIN_BATTERY_LEVEL;
-    m_battery_sim_cfg.max          = MAX_BATTERY_LEVEL;
-    m_battery_sim_cfg.incr         = BATTERY_LEVEL_INCREMENT;
-    m_battery_sim_cfg.start_at_max = true;
+	BATT_EVT_TIMEOUT = 0x01,
+	TEMPERATURE_EVT_TIMEOUT
+} sensor_timeout_evt_t;
 
-    sensorsim_init(&m_battery_sim_state, &m_battery_sim_cfg);
+static void battery_level_update(void);
+static void temperature_update(void);
 
-    m_temp_celcius_sim_cfg.min          = MIN_CELCIUS_DEGREES;
-    m_temp_celcius_sim_cfg.max          = MAX_CELCIUS_DEGRESS;
-    m_temp_celcius_sim_cfg.incr         = CELCIUS_DEGREES_INCREMENT;
-    m_temp_celcius_sim_cfg.start_at_max = false;
-
-    sensorsim_init(&m_temp_celcius_sim_state, &m_temp_celcius_sim_cfg);
-}
 
 /**@brief Function for handling the Battery measurement timer timeout.
  *
@@ -69,30 +55,61 @@ void sensor_simulator_init(void)
 //     APP_ERROR_CHECK(err_code);
 // }
 
+/**@brief Handle events from app_timer .
+ *
+ * @param[in]   p_event_data   	Event data to be scheduled
+ * @param[in]   event_size   	Size of event data to be scheduled.
+ */
+static void sensor_timeout_sched_handler(void *p_event_data, uint16_t event_size)
+{
+    UNUSED_PARAMETER(event_size);
+    uint8_t *p_evt = p_event_data;
+    // NRF_LOG_INFO("sensor_timeout_sched_handler: %d", *p_evt);
+    switch (*p_evt)
+    {
+    	case BATT_EVT_TIMEOUT://display on
+			battery_level_update();
+    		break;
+		
+		case TEMPERATURE_EVT_TIMEOUT://display refresh
+			temperature_update();
+    		break;
+		
+    	default:
+			NRF_LOG_DEBUG("unknown event");
+    		break;
+    }
+}
+
 /**@brief Function for performing a battery measurement, and update the Battery Level characteristic in the Battery Service.
  */
 static void battery_level_update(void)
 {
     ret_code_t err_code;
     uint8_t  battery_level;
+    uint16_t vbatt;              // Variable to hold voltage reading
+    battery_voltage_get(&vbatt); // Get new battery voltage
 
-    battery_level = (uint8_t)sensorsim_measure(&m_battery_sim_state, &m_battery_sim_cfg);
-
-    err_code = ble_bas_battery_level_update(&m_bas, battery_level, BLE_CONN_HANDLE_ALL);
-
-    if ((err_code != NRF_SUCCESS) &&
-        (err_code != NRF_ERROR_INVALID_STATE) &&
-        (err_code != NRF_ERROR_RESOURCES) &&
-        (err_code != NRF_ERROR_BUSY) &&
-        (err_code != BLE_ERROR_GATTS_SYS_ATTR_MISSING)
-       )
-    {
-        SEGGER_RTT_printf(0, "Battery level: %d ... Sending => FAILED\n", battery_level);
-        APP_ERROR_HANDLER(err_code);
+    battery_level = battery_level_percent(vbatt);    //Transform the millivolts value into battery level percent.
+    if (m_bas_notif_enable) {
+        err_code = ble_bas_battery_level_update(&m_bas, battery_level, BLE_CONN_HANDLE_ALL);
+        if ((err_code != NRF_SUCCESS) &&
+            (err_code != NRF_ERROR_INVALID_STATE) &&
+            (err_code != NRF_ERROR_RESOURCES) &&
+            (err_code != NRF_ERROR_BUSY) &&
+            (err_code != BLE_ERROR_GATTS_SYS_ATTR_MISSING)
+        )
+        {
+            NRF_LOG_INFO("Battery level: %d%s Sending => FAILED", battery_level, "%");
+            APP_ERROR_HANDLER(err_code);
+        } else {
+            NRF_LOG_INFO("Battery level: %d%s Sending => SUCCESSED", battery_level, "%");
+        }
     } else {
-        SEGGER_RTT_printf(0, "Battery level: %d ... Sending => SUCCESSED\n", battery_level);
+        NRF_LOG_INFO("Battery level: %d%s", battery_level, "%");
     }
 }
+
 
 /**@brief Function for handling the Battery measurement timer timeout.
  *
@@ -104,77 +121,48 @@ static void battery_level_update(void)
 void battery_timeout_handler(void * p_context)
 {
     UNUSED_PARAMETER(p_context);
-    battery_level_update();
-}
-
-/**@brief Function for populating simulated health thermometer measurement.
- */
-static void hts_sim_measurement(ble_hts_meas_t * p_meas)
-{
-    static ble_date_time_t time_stamp = { 2020, 30, 11, 10, 50, 0 };
-    uint32_t celciusX100;
-
-    p_meas->temp_in_fahr_units = false;
-    p_meas->time_stamp_present = false;
-    p_meas->temp_type_present  = (TEMP_TYPE_AS_CHARACTERISTIC ? false : true);
-
-    celciusX100 = sensorsim_measure(&m_temp_celcius_sim_state, &m_temp_celcius_sim_cfg);
-
-    p_meas->temp_in_celcius.exponent = -2;
-    p_meas->temp_in_celcius.mantissa = celciusX100;
-    p_meas->temp_in_fahr.exponent    = -2;
-    p_meas->temp_in_fahr.mantissa    = (32 * 100) + ((celciusX100 * 9) / 5);
-    p_meas->time_stamp               = time_stamp;
-    p_meas->temp_type                = BLE_HTS_TEMP_TYPE_BODY;
-
-    // update simulated time stamp
-    time_stamp.seconds += 27;
-    if (time_stamp.seconds > 59)
-    {
-        time_stamp.seconds -= 60;
-        time_stamp.minutes++;
-        if (time_stamp.minutes > 59)
-        {
-            time_stamp.minutes = 0;
-        }
-    }
+    uint8_t batt_sched = BATT_EVT_TIMEOUT;
+    app_sched_event_put(&batt_sched, sizeof(batt_sched), sensor_timeout_sched_handler);
 }
 
 /**@brief Function for simulating and sending one Temperature Measurement.
  */
-static void temperature_measurement_update(void)
+static void temperature_update(void)
 {
-    ble_hts_meas_t simulated_meas;
     ret_code_t     err_code;
+    ble_hts_meas_t temperature_meas;
+    
+    temperature_measurement(&temperature_meas);
     if (!m_hts_meas_ind_conf_pending)
     {
-        hts_sim_measurement(&simulated_meas);
-
-        err_code = ble_hts_measurement_send(&m_hts, &simulated_meas);
-
+        err_code = ble_hts_measurement_send(&m_hts, &temperature_meas);
         switch (err_code)
         {
             case NRF_SUCCESS:
-                SEGGER_RTT_printf(0, "\nTemperature: %d ... Sending => SUCCESSED\n", simulated_meas.temp_in_celcius.mantissa);
+                NRF_LOG_INFO("Temperature: %dC Sending => SUCCESSED", temperature_meas.temp_in_celcius.mantissa);
                 // Measurement was successfully sent, wait for confirmation.
                 m_hts_meas_ind_conf_pending = true;
                 break;
 
             case NRF_ERROR_INVALID_STATE:
-                SEGGER_RTT_printf(0, "\nTemperature: %d ... Sending => INVALID_STATE\n", simulated_meas.temp_in_celcius.mantissa);
+                NRF_LOG_INFO("Temperature: %dC Sending => INVALID_STATE", temperature_meas.temp_in_celcius.mantissa);
                 // Ignore error.
                 break;
 
             default:
-                SEGGER_RTT_printf(0, "\nTemperature: %d ... Sending => FAILED\n", simulated_meas.temp_in_celcius.mantissa);
+                NRF_LOG_INFO("Temperature: %dC Sending => FAILED", temperature_meas.temp_in_celcius.mantissa);
                 APP_ERROR_HANDLER(err_code);
                 break;
         }
+    } else {
+        NRF_LOG_INFO("Temperature: %dC", temperature_meas.temp_in_celcius.mantissa);
     }
 }
-/**@brief Function for handling the Battery measurement timer timeout.
+
+
+/**@brief Function for handling the Temperature measurement timer timeout.
  *
- * @details This function will be called each time the battery level measurement timer expires.
+ * @details This function will be called each time the temperature measurement timer expires.
  *
  * @param[in] p_context  Pointer used for passing some arbitrary information (context) from the
  *                       app_start_timer() call to the timeout handler.
@@ -182,7 +170,8 @@ static void temperature_measurement_update(void)
 void temperature_timeout_handler(void * p_context)
 {
     UNUSED_PARAMETER(p_context);
-    temperature_measurement_update();
+    uint8_t temp_sched = TEMPERATURE_EVT_TIMEOUT;
+    app_sched_event_put(&temp_sched, sizeof(temp_sched), sensor_timeout_sched_handler);
 }
 
 /**@brief Function for handling Peer Manager events.
@@ -200,18 +189,17 @@ static void pm_evt_handler(pm_evt_t const * p_evt)
     switch (p_evt->evt_id)
     {
         case PM_EVT_CONN_SEC_SUCCEEDED:
-            SEGGER_RTT_printf(0, "PM_EVT_CONN_SEC_SUCCEEDED\n");
+            NRF_LOG_INFO("PM_EVT_CONN_SEC_SUCCEEDED");
             err_code = ble_hts_is_indication_enabled(&m_hts, &is_indication_enabled);
             APP_ERROR_CHECK(err_code);
-            SEGGER_RTT_printf(0, "is_indication_enabled: %d\n", is_indication_enabled);
-            if (is_indication_enabled)
-            {
+            if (is_indication_enabled) {
                 m_hts_meas_ind_conf_pending = false;
             }
             break;
 
         case PM_EVT_PEERS_DELETE_SUCCEEDED:
-            advertising_start(false);
+            NRF_LOG_INFO("PM_EVT_PEERS_DELETE_SUCCEEDED");
+            advertising_start();
             break;
 
         default:
@@ -261,6 +249,282 @@ void gatt_init(void)
     APP_ERROR_CHECK(err_code);
 }
 
+/**@brief Handler for shutdown preparation.
+ *
+ * @details During shutdown procedures, this function will be called at a 1 second interval
+ *          untill the function returns true. When the function returns true, it means that the
+ *          app is ready to reset to DFU mode.
+ *
+ * @param[in]   event   Power manager event.
+ *
+ * @retval  True if shutdown is allowed by this power manager handler, otherwise false.
+ */
+static bool app_shutdown_handler(nrf_pwr_mgmt_evt_t event)
+{
+    switch (event)
+    {
+        case NRF_PWR_MGMT_EVT_PREPARE_DFU:
+            // NRF_LOG_INFO("Power management wants to reset to DFU mode.");
+            // YOUR_JOB: Get ready to reset into DFU mode
+            //
+            // If you aren't finished with any ongoing tasks, return "false" to
+            // signal to the system that reset is impossible at this stage.
+            //
+            // Here is an example using a variable to delay resetting the device.
+            //
+            // if (!m_ready_for_reset)
+            // {
+            //      return false;
+            // }
+            // else
+            //{
+            //
+            //    // Device ready to enter
+            //    uint32_t err_code;
+            //    err_code = sd_softdevice_disable();
+            //    APP_ERROR_CHECK(err_code);
+            //    err_code = app_timer_stop_all();
+            //    APP_ERROR_CHECK(err_code);
+            //}
+            break;
+
+        default:
+            // YOUR_JOB: Implement any of the other events available from the power management module:
+            //      -NRF_PWR_MGMT_EVT_PREPARE_SYSOFF
+            //      -NRF_PWR_MGMT_EVT_PREPARE_WAKEUP
+            //      -NRF_PWR_MGMT_EVT_PREPARE_RESET
+            return true;
+    }
+
+    // NRF_LOG_INFO("Power management allowed to reset to DFU mode.");
+    return true;
+}
+
+/**@brief Register application shutdown handler with priority 0.
+ */
+NRF_PWR_MGMT_HANDLER_REGISTER(app_shutdown_handler, 0);
+
+static void buttonless_dfu_sdh_state_observer(nrf_sdh_state_evt_t state, void * p_context)
+{
+    if (state == NRF_SDH_EVT_STATE_DISABLED)
+    {
+        // Softdevice was disabled before going into reset. Inform bootloader to skip CRC on next boot.
+        nrf_power_gpregret2_set(BOOTLOADER_DFU_SKIP_CRC);
+
+        //Go to system off.
+        nrf_pwr_mgmt_shutdown(NRF_PWR_MGMT_SHUTDOWN_GOTO_SYSOFF);
+    }
+}
+
+/* nrf_sdh state observer. */
+NRF_SDH_STATE_OBSERVER(m_buttonless_dfu_state_obs, 0) =
+{
+    .handler = buttonless_dfu_sdh_state_observer,
+};
+
+static void advertising_config_get(ble_adv_modes_config_t * p_config)
+{
+    memset(p_config, 0, sizeof(ble_adv_modes_config_t));
+
+    p_config->ble_adv_fast_enabled  = true;
+    p_config->ble_adv_fast_interval = APP_ADV_INTERVAL;
+    p_config->ble_adv_fast_timeout  = APP_ADV_DURATION;
+}
+
+static void disconnect(uint16_t conn_handle, void * p_context)
+{
+    UNUSED_PARAMETER(p_context);
+
+    ret_code_t err_code = sd_ble_gap_disconnect(conn_handle, BLE_HCI_REMOTE_USER_TERMINATED_CONNECTION);
+    if (err_code != NRF_SUCCESS)
+    {
+        NRF_LOG_INFO("Failed to disconnect connection. Connection handle: %d Error: %d", conn_handle, err_code);
+    }
+    else
+    {
+        NRF_LOG_INFO("Disconnected connection handle %d", conn_handle);
+    }
+}
+
+/**@brief Function for handling dfu events from the Buttonless Secure DFU service
+ *
+ * @param[in]   event   Event from the Buttonless Secure DFU service.
+ */
+static void ble_dfu_evt_handler(ble_dfu_buttonless_evt_type_t event)
+{
+    switch (event)
+    {
+        case BLE_DFU_EVT_BOOTLOADER_ENTER_PREPARE:
+        {
+            NRF_LOG_INFO("Device is preparing to enter bootloader mode.");
+
+            // Prevent device from advertising on disconnect.
+            ble_adv_modes_config_t config;
+            advertising_config_get(&config);
+            config.ble_adv_on_disconnect_disabled = true;
+            ble_advertising_modes_config_set(&m_advertising, &config);
+
+            // Disconnect all other bonded devices that currently are connected.
+            // This is required to receive a service changed indication
+            // on bootup after a successful (or aborted) Device Firmware Update.
+            uint32_t conn_count = ble_conn_state_for_each_connected(disconnect, NULL);
+            NRF_LOG_INFO("Disconnected %d links.", conn_count);
+            break;
+        }
+
+        case BLE_DFU_EVT_BOOTLOADER_ENTER:
+            // YOUR_JOB: Write app-specific unwritten data to FLASH, control finalization of this
+            //           by delaying reset by reporting false in app_shutdown_handler
+            NRF_LOG_INFO("Device will enter bootloader mode.");
+            break;
+
+        case BLE_DFU_EVT_BOOTLOADER_ENTER_FAILED:
+            NRF_LOG_ERROR("Request to enter bootloader mode failed asynchroneously.");
+            // YOUR_JOB: Take corrective measures to resolve the issue
+            //           like calling APP_ERROR_CHECK to reset the device.
+            break;
+
+        case BLE_DFU_EVT_RESPONSE_SEND_ERROR:
+            NRF_LOG_ERROR("Request to send a response to client failed.");
+            // YOUR_JOB: Take corrective measures to resolve the issue
+            //           like calling APP_ERROR_CHECK to reset the device.
+            APP_ERROR_CHECK(false);
+            break;
+
+        default:
+            NRF_LOG_ERROR("Unknown event from ble_dfu_buttonless.");
+            break;
+    }
+}
+
+/**@brief Function for handling Service errors.
+ *
+ * @details A pointer to this function will be passed to each service which may need to inform the
+ *          application about an error.
+ *
+ * @param[in] nrf_error  Error code containing information about what went wrong.
+ */
+static void service_error_handler(uint32_t nrf_error)
+{
+    NRF_LOG_INFO("service_error_handler!!!!");
+    APP_ERROR_HANDLER(nrf_error);
+}
+
+
+/**@brief Function for initializing the Queued Write module.
+ */
+static void qwr_init(void)
+{
+    ret_code_t         err_code;
+    nrf_ble_qwr_init_t qwr_init_obj = {0};
+
+    // Initialize Queued Write Module.
+    qwr_init_obj.error_handler = service_error_handler;
+
+    err_code = nrf_ble_qwr_init(&m_qwr, &qwr_init_obj);
+    APP_ERROR_CHECK(err_code);
+}
+
+/**@brief Function for handling the Battery Service events.
+ *
+ * @details This function will be called for all Battery Service events which are passed to the
+ |          application.
+ *
+ * @param[in] p_bas  Battery Service structure.
+ * @param[in] p_evt  Event received from the Battery Service.
+ */
+void on_bas_evt(ble_bas_t * p_bas, ble_bas_evt_t * p_evt)
+{
+    switch (p_evt->evt_type)
+    {
+        case BLE_BAS_EVT_NOTIFICATION_ENABLED:
+            m_bas_notif_enable = true;
+            NRF_LOG_INFO("BLE_BAS_EVT_NOTIFICATION_ENABLED");
+            break; // BLE_BAS_EVT_NOTIFICATION_ENABLED
+
+        case BLE_BAS_EVT_NOTIFICATION_DISABLED:
+            m_bas_notif_enable = false;
+            NRF_LOG_INFO("BLE_BAS_EVT_NOTIFICATION_DISABLED");
+            break; // BLE_BAS_EVT_NOTIFICATION_DISABLED
+
+        default:
+            // No implementation needed.
+            break;
+    }
+}
+
+/**@brief Function for initializing the Battery Service.
+ */
+static void bas_init(void)
+{
+    ret_code_t     err_code;
+    ble_bas_init_t bas_init_obj;
+
+    memset(&bas_init_obj, 0, sizeof(bas_init_obj));
+
+    bas_init_obj.evt_handler          = on_bas_evt;
+    bas_init_obj.support_notification = true;
+    bas_init_obj.p_report_ref         = NULL;
+    bas_init_obj.initial_batt_level   = 100;
+
+    bas_init_obj.bl_rd_sec        = SEC_OPEN;
+    bas_init_obj.bl_cccd_wr_sec   = SEC_OPEN;
+    bas_init_obj.bl_report_rd_sec = SEC_OPEN;
+
+    err_code = ble_bas_init(&m_bas, &bas_init_obj);
+    APP_ERROR_CHECK(err_code);
+}
+
+/**@brief Function for handling the Health Thermometer Service events.
+ *
+ * @details This function will be called for all Health Thermometer Service events which are passed
+ *          to the application.
+ *
+ * @param[in] p_hts  Health Thermometer Service structure.
+ * @param[in] p_evt  Event received from the Health Thermometer Service.
+ */
+static void on_hts_evt(ble_hts_t * p_hts, ble_hts_evt_t * p_evt)
+{
+    switch (p_evt->evt_type)
+    {
+        case BLE_HTS_EVT_INDICATION_ENABLED:
+            NRF_LOG_INFO("received BLE_HTS_EVT_INDICATION_ENABLED");
+            m_hts_meas_ind_conf_pending = false;
+            break;
+
+        case BLE_HTS_EVT_INDICATION_CONFIRMED:
+            NRF_LOG_INFO("received BLE_HTS_EVT_INDICATION_CONFIRMED");
+            m_hts_meas_ind_conf_pending = false;
+            break;
+
+        default:
+            // No implementation needed.
+            break;
+    }
+}
+
+/**@brief Function for initializing the Health Thermometer Service.
+ */
+static void hts_init(void)
+{
+    ret_code_t     err_code;
+    ble_hts_init_t hts_init_obj;
+
+    memset(&hts_init_obj, 0, sizeof(hts_init_obj));
+
+    hts_init_obj.evt_handler                 = on_hts_evt;
+    hts_init_obj.p_gatt_queue                = &m_ble_gatt_queue;
+    hts_init_obj.error_handler               = service_error_handler;
+    hts_init_obj.temp_type_as_characteristic = TEMP_TYPE_AS_CHARACTERISTIC;
+    hts_init_obj.temp_type                   = BLE_HTS_TEMP_TYPE_BODY;
+
+    // Here the sec level for the Health Thermometer Service can be changed/increased.
+    hts_init_obj.ht_meas_cccd_wr_sec = SEC_JUST_WORKS;
+    hts_init_obj.ht_type_rd_sec      = SEC_OPEN;
+
+    err_code = ble_hts_init(&m_hts, &hts_init_obj);
+    APP_ERROR_CHECK(err_code);
+}
 
 /**@brief Function for handling the Custom Service Service events.
  *
@@ -302,123 +566,76 @@ static void on_cus_evt(ble_cus_t     * p_cus_service,
     }
 }
 
-/**@brief Function for handling the Health Thermometer Service events.
- *
- * @details This function will be called for all Health Thermometer Service events which are passed
- *          to the application.
- *
- * @param[in] p_hts  Health Thermometer Service structure.
- * @param[in] p_evt  Event received from the Health Thermometer Service.
+/**@brief Function for initializing the Custom Service.
  */
-static void on_hts_evt(ble_hts_t * p_hts, ble_hts_evt_t * p_evt)
+static void cus_init(void)
 {
-    switch (p_evt->evt_type)
-    {
-        case BLE_HTS_EVT_INDICATION_ENABLED:
-            SEGGER_RTT_printf(0, "received BLE_HTS_EVT_INDICATION_ENABLED\n");
-            // Indication has been enabled, send a single temperature measurement
-            // temperature_measurement_update();
-            m_hts_meas_ind_conf_pending = false;
-            break;
+    ret_code_t         err_code;
+    ble_cus_init_t     cus_init_obj;
 
-        case BLE_HTS_EVT_INDICATION_CONFIRMED:
-            SEGGER_RTT_printf(0, "received BLE_HTS_EVT_INDICATION_CONFIRMED\n");
-            m_hts_meas_ind_conf_pending = false;
-            break;
+    memset(&cus_init_obj, 0, sizeof(cus_init_obj));
 
-        default:
-            // No implementation needed.
-            break;
-    }
+    cus_init_obj.evt_handler                = on_cus_evt;
+
+    BLE_GAP_CONN_SEC_MODE_SET_OPEN(&cus_init_obj.custom_value_char_attr_md.cccd_write_perm);
+    BLE_GAP_CONN_SEC_MODE_SET_OPEN(&cus_init_obj.custom_value_char_attr_md.read_perm);
+    BLE_GAP_CONN_SEC_MODE_SET_OPEN(&cus_init_obj.custom_value_char_attr_md.write_perm);
+
+    err_code = ble_cus_init(&m_cus, &cus_init_obj);
+    APP_ERROR_CHECK(err_code);
 }
 
-
-/**@brief Function for handling Queued Write Module errors.
- *
- * @details A pointer to this function will be passed to each service which may need to inform the
- *          application about an error.
- *
- * @param[in]   nrf_error   Error code containing information about what went wrong.
+/**@brief Function for initializing the DFU Service.
  */
-static void nrf_qwr_error_handler(uint32_t nrf_error)
+static void dfu_init(void)
 {
-    APP_ERROR_HANDLER(nrf_error);
+    ret_code_t         err_code;
+    ble_dfu_buttonless_init_t dfus_init_obj;
+
+    memset(&dfus_init_obj, 0, sizeof(dfus_init_obj));
+    
+    dfus_init_obj.evt_handler = ble_dfu_evt_handler;
+
+    err_code = ble_dfu_buttonless_init(&dfus_init_obj);
+    APP_ERROR_CHECK(err_code);
+}
+
+/**@brief Function for initializing the Device Information Service.
+ */
+static void dis_init(void)
+{
+    ret_code_t         err_code;
+    ble_dis_sys_id_t   sys_id_obj;
+    ble_dis_init_t     dis_init_obj;
+
+    memset(&sys_id_obj, 0, sizeof(sys_id_obj));
+    memset(&dis_init_obj, 0, sizeof(dis_init_obj));
+
+    ble_srv_ascii_to_utf8(&dis_init_obj.manufact_name_str, MANUFACTURER_NAME);
+    ble_srv_ascii_to_utf8(&dis_init_obj.model_num_str, MODEL_NUM);
+
+    sys_id_obj.manufacturer_id            = MANUFACTURER_ID;
+    sys_id_obj.organizationally_unique_id = ORG_UNIQUE_ID;
+    dis_init_obj.p_sys_id                 = &sys_id_obj;
+
+    dis_init_obj.dis_char_rd_sec = SEC_OPEN;
+
+    err_code = ble_dis_init(&dis_init_obj);
+    APP_ERROR_CHECK(err_code);
 }
 
 /**@brief Function for initializing services that will be used by the application.
  *
- * @details Initialize the Health Thermometer, Battery and Device Information services.
+ * @details Initialize the Health Thermometer, Battery, Custom, DFU and Device Information services.
  */
 void services_init(void)
 {
-    ret_code_t         err_code;
-    ble_hts_init_t     hts_init;
-    ble_bas_init_t     bas_init;
-    ble_dis_init_t     dis_init;
-    ble_cus_init_t     cus_init;
-    nrf_ble_qwr_init_t qwr_init = {0};
-    ble_dis_sys_id_t   sys_id;
-
-    // Initialize Queued Write Module.
-    qwr_init.error_handler = nrf_qwr_error_handler;
-
-    err_code = nrf_ble_qwr_init(&m_qwr, &qwr_init);
-    APP_ERROR_CHECK(err_code);
-
-    // Initialize Health Thermometer Service
-    memset(&hts_init, 0, sizeof(hts_init));
-
-    hts_init.evt_handler                 = on_hts_evt;
-    hts_init.temp_type_as_characteristic = TEMP_TYPE_AS_CHARACTERISTIC;
-    hts_init.temp_type                   = BLE_HTS_TEMP_TYPE_BODY;
-
-    // Here the sec level for the Health Thermometer Service can be changed/increased.
-    hts_init.ht_meas_cccd_wr_sec = SEC_JUST_WORKS;
-    hts_init.ht_type_rd_sec      = SEC_OPEN;
-
-    err_code = ble_hts_init(&m_hts, &hts_init);
-    APP_ERROR_CHECK(err_code);
-
-    // Initialize Battery Service.
-    memset(&bas_init, 0, sizeof(bas_init));
-
-    // Here the sec level for the Battery Service can be changed/increased.
-    bas_init.bl_rd_sec        = SEC_OPEN;
-    bas_init.bl_cccd_wr_sec   = SEC_OPEN;
-    bas_init.bl_report_rd_sec = SEC_OPEN;
-
-    bas_init.evt_handler          = NULL;
-    bas_init.support_notification = true;
-    bas_init.p_report_ref         = NULL;
-    bas_init.initial_batt_level   = 100;
-
-    err_code = ble_bas_init(&m_bas, &bas_init);
-    APP_ERROR_CHECK(err_code);
-
-    // Initialize CUS Service init structure to zero.
-    cus_init.evt_handler                = on_cus_evt;
-
-    BLE_GAP_CONN_SEC_MODE_SET_OPEN(&cus_init.custom_value_char_attr_md.cccd_write_perm);
-    BLE_GAP_CONN_SEC_MODE_SET_OPEN(&cus_init.custom_value_char_attr_md.read_perm);
-    BLE_GAP_CONN_SEC_MODE_SET_OPEN(&cus_init.custom_value_char_attr_md.write_perm);
-
-    err_code = ble_cus_init(&m_cus, &cus_init);
-    APP_ERROR_CHECK(err_code);
-
-    // Initialize Device Information Service.
-    memset(&dis_init, 0, sizeof(dis_init));
-
-    ble_srv_ascii_to_utf8(&dis_init.manufact_name_str, MANUFACTURER_NAME);
-    ble_srv_ascii_to_utf8(&dis_init.model_num_str, MODEL_NUM);
-
-    sys_id.manufacturer_id            = MANUFACTURER_ID;
-    sys_id.organizationally_unique_id = ORG_UNIQUE_ID;
-    dis_init.p_sys_id                 = &sys_id;
-
-    dis_init.dis_char_rd_sec = SEC_OPEN;
-
-    err_code = ble_dis_init(&dis_init);
-    APP_ERROR_CHECK(err_code);
+    qwr_init();
+    bas_init();
+    hts_init();
+    cus_init();
+    dfu_init();
+    dis_init();    
 }
 
 /**@brief Function for handling the Connection Parameters Module.
@@ -502,12 +719,14 @@ static void on_adv_evt(ble_adv_evt_t ble_adv_evt)
     switch (ble_adv_evt)
     {
         case BLE_ADV_EVT_FAST:
-            SEGGER_RTT_printf(0, "%s\n", "Fast advertising.");
+            NRF_LOG_INFO("Fast advertising");
             err_code = bsp_indication_set(BSP_INDICATE_ADVERTISING);
             APP_ERROR_CHECK(err_code);
+            app_led_blink();
             break;
 
         case BLE_ADV_EVT_IDLE:
+            app_led_off();
             sleep_mode_enter();
             break;
 
@@ -529,18 +748,27 @@ static void ble_evt_handler(ble_evt_t const * p_ble_evt, void * p_context)
     switch (p_ble_evt->header.evt_id)
     {
         case BLE_GAP_EVT_CONNECTED:
-            SEGGER_RTT_printf(0, "\nConnected.\n");
+            NRF_LOG_INFO("BLE Connected.");
+            m_bas_notif_enable = true;
             err_code = bsp_indication_set(BSP_INDICATE_CONNECTED);
             APP_ERROR_CHECK(err_code);
             m_conn_handle = p_ble_evt->evt.gap_evt.conn_handle;
             err_code = nrf_ble_qwr_conn_handle_assign(&m_qwr, m_conn_handle);
             APP_ERROR_CHECK(err_code);
+            app_led_on();
             break;
 
         case BLE_GAP_EVT_DISCONNECTED:
-            SEGGER_RTT_printf(0, "\nDisconnected, reason %d.\n", p_ble_evt->evt.gap_evt.params.disconnected.reason);
+            NRF_LOG_INFO("BLE Disconnected, reason %d.", p_ble_evt->evt.gap_evt.params.disconnected.reason);
             m_conn_handle               = BLE_CONN_HANDLE_INVALID;
-            m_hts_meas_ind_conf_pending = false;
+            m_hts_meas_ind_conf_pending = true;
+            m_bas_notif_enable = false;
+            app_led_off();
+            advertising_start();
+            break;
+
+        case BLE_GAP_EVT_ADV_SET_TERMINATED:
+            app_led_off();
             break;
 
         case BLE_GAP_EVT_PHY_UPDATE_REQUEST:
@@ -555,7 +783,7 @@ static void ble_evt_handler(ble_evt_t const * p_ble_evt, void * p_context)
         } break;
 
         case BLE_GATTC_EVT_TIMEOUT:
-            SEGGER_RTT_printf(0, "\nGATT Client Timeout.\n");
+            // NRF_LOG_INFO("GATT Client Timeout.");
             // Disconnect on GATT Client timeout event.
             err_code = sd_ble_gap_disconnect(p_ble_evt->evt.gattc_evt.conn_handle,
                                              BLE_HCI_REMOTE_USER_TERMINATED_CONNECTION);
@@ -563,7 +791,7 @@ static void ble_evt_handler(ble_evt_t const * p_ble_evt, void * p_context)
             break;
 
         case BLE_GATTS_EVT_TIMEOUT:
-            SEGGER_RTT_printf(0, "\nGATT Server Timeout.\n");
+            // NRF_LOG_INFO("GATT Server Timeout.");
             // Disconnect on GATT Server timeout event.
             err_code = sd_ble_gap_disconnect(p_ble_evt->evt.gatts_evt.conn_handle,
                                              BLE_HCI_REMOTE_USER_TERMINATED_CONNECTION);
@@ -637,97 +865,17 @@ void peer_manager_init(void)
 }
 
 
-/**@brief Clear bond information from persistent storage.
- */
-void delete_bonds(void)
-{
-    ret_code_t err_code;
-
-    SEGGER_RTT_printf(0, "Erase bond\n");
-
-    err_code = pm_peers_delete();
-    APP_ERROR_CHECK(err_code);
-}
-
 /**@brief Function for starting advertising.
  */
-void advertising_start(bool erase_bonds)
+void advertising_start()
 {
-    if (erase_bonds == true)
-    {
-        delete_bonds();
-        // Advertising is started by PM_EVT_PEERS_DELETE_SUCCEEDED event.
-    }
-    else {
-        uint32_t err_code = ble_advertising_start(&m_advertising, BLE_ADV_MODE_FAST);
-        APP_ERROR_CHECK(err_code);
+    uint32_t err_code;
+    err_code = ble_advertising_start(&m_advertising, BLE_ADV_MODE_FAST);
+    if(err_code != NRF_SUCCESS) {
+        // Ignore error.
     }
 }
 
-/**@brief Function for handling events from the BSP module.
- *
- * @param[in]   event   Event generated by button press.
- */
-static void bsp_event_handler(bsp_event_t event)
-{
-    ret_code_t err_code;
-
-    switch (event)
-    {
-        case BSP_EVENT_SLEEP:
-            sleep_mode_enter();
-            break;
-
-        case BSP_EVENT_DISCONNECT:
-            err_code = sd_ble_gap_disconnect(m_conn_handle,
-                                             BLE_HCI_REMOTE_USER_TERMINATED_CONNECTION);
-            if (err_code != NRF_ERROR_INVALID_STATE)
-            {
-                APP_ERROR_CHECK(err_code);
-            }
-            break;
-
-        case BSP_EVENT_WHITELIST_OFF:
-            if (m_conn_handle == BLE_CONN_HANDLE_INVALID)
-            {
-                err_code = ble_advertising_restart_without_whitelist(&m_advertising);
-                if (err_code != NRF_ERROR_INVALID_STATE)
-                {
-                    APP_ERROR_CHECK(err_code);
-                }
-            }
-            break;
-
-        case BSP_EVENT_KEY_0:
-            // if (m_conn_handle != BLE_CONN_HANDLE_INVALID)
-            // {
-            //     temperature_measurement_send();
-            // }
-            // TO DO: notify for app when operation level change
-            break;
-
-        default:
-            break;
-    }
-}
-
-/**@brief Function for initializing buttons and leds.
- *
- * @param[out] p_erase_bonds  Will be true if the clear bonding button was pressed to wake the application up.
- */
-void buttons_leds_init(bool * p_erase_bonds)
-{
-    ret_code_t err_code;
-    bsp_event_t startup_event;
-
-    err_code = bsp_init(BSP_INIT_LEDS, bsp_event_handler);
-    APP_ERROR_CHECK(err_code);
-
-    err_code = bsp_btn_ble_init(NULL, &startup_event);
-    APP_ERROR_CHECK(err_code);
-
-    *p_erase_bonds = (startup_event == BSP_EVENT_CLEAR_BONDING_DATA);
-}
 
 /**@brief Function for initializing the Advertising functionality.
  *
@@ -750,6 +898,7 @@ void advertising_init(void)
     init.config.ble_adv_fast_enabled  = true;
     init.config.ble_adv_fast_interval = APP_ADV_INTERVAL;
     init.config.ble_adv_fast_timeout  = APP_ADV_DURATION;
+    init.config.ble_adv_on_disconnect_disabled = true;
 
     init.evt_handler = on_adv_evt;
 
