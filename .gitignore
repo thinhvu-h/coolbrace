@@ -3,3 +3,4 @@
 nrf52x/_build/
 nrf52x/linker_scripts/.settings/
 nrf52x/.vscode/
+nrf52x/segger/Output/
