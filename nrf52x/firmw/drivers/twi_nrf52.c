@@ -40,14 +40,14 @@ void twi_master_init(void)
 /**
  * @brief Function for reading data from temperature sensor.
  */
-void twi_master_read(uint8_t address, uint8_t * data, uint16_t data_length)
+ret_code_t twi_master_read(uint8_t address, uint8_t * data, uint16_t data_length)
 {
     ret_code_t err_code = nrf_drv_twi_rx(&m_twi, address, data, data_length);
-    APP_ERROR_CHECK(err_code);
+    return err_code;
 }
 
-void twi_master_write(uint8_t address, uint8_t * data, uint16_t data_length, bool no_stop)
+ret_code_t twi_master_write(uint8_t address, uint8_t * data, uint16_t data_length, bool no_stop)
 {
     ret_code_t err_code = nrf_drv_twi_tx(&m_twi, address, data, data_length, no_stop);
-    APP_ERROR_CHECK(err_code);
+    return err_code;
 }

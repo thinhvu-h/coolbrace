@@ -54,7 +54,7 @@
  * @retval false TWI bus is stuck.
  */
 void twi_master_init(void);
-void twi_master_read(uint8_t address, uint8_t * data, uint16_t data_length);
-void twi_master_write(uint8_t address, uint8_t * data, uint16_t data_length, bool no_stop);
+ret_code_t twi_master_read(uint8_t address, uint8_t * data, uint16_t data_length);
+ret_code_t twi_master_write(uint8_t address, uint8_t * data, uint16_t data_length, bool no_stop);
 
 #endif /* DRIVERS_TWI_NRF52_H_ */

@@ -9,9 +9,9 @@
 #include "nrf_log_ctrl.h"
 #include "nrf_log_default_backends.h"
 
-#define AS6212_HUMAN_SENSOR_ADDR     (0x92>>1)
+#define AS6212_HUMAN_SENSOR_ADDR   (0x92>>1)
 #define AS6212_ENV_SENSOR_ADDR     (0x92>>1)
-#define TEMPERATURE_MEAS_INTERVAL   APP_TIMER_TICKS(4000)      /** temperature measurement interval (ticks). */
+#define TEMPERATURE_MEAS_INTERVAL   APP_TIMER_TICKS(10000)      /** temperature measurement interval (ticks). */
 
 #define TEMP_TYPE_AS_CHARACTERISTIC     0  /**< Determines if temperature type is given as characteristic (1) or as a field of measurement (0). */
 

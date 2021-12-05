@@ -4,13 +4,13 @@ static void AS6212_readTemperature(float* human_temp, float* env_temp);
 
 static void AS6212_readTemperature(float* human_temp, float* env_temp)
 {
-    uint8_t twi_cmd=0;
+    uint8_t twi_cmd=0x00;
     uint8_t twi_data[2]={0};
 
     twi_master_write(AS6212_HUMAN_SENSOR_ADDR, &twi_cmd, sizeof(twi_cmd), true);
     twi_master_read(AS6212_HUMAN_SENSOR_ADDR, twi_data, sizeof(twi_data));
     *human_temp = 0.0078125*(twi_data[0] << 8 | twi_data[1]);
-    // NRF_LOG_INFO("twi_data[0]:%d, twi_data[1]:%d, human_temp: %d\r\n", twi_data[0], twi_data[1], *human_temp);
+    NRF_LOG_INFO("twi_data[0]:%d, twi_data[1]:%d, human_temp: %d\r\n", twi_data[0], twi_data[1], *human_temp);
 
     // memset(twi_data, 0, sizeof(twi_data));
     // twi_master_write(AS6212_HUMAN_SENSOR_ADDR, &twi_cmd, sizeof(twi_cmd), true);
